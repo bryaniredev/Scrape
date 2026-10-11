@@ -7,6 +7,8 @@ sources directly (no CORS problems, no API keys):
 * acs_pa.json       - Census ACS 5-year neighborhood profile for every PA ZIP
 * zcta_pa.json      - ZIP centroids (Census Gazetteer), used for "ZIPs within N minutes"
 * emergency_pa.json - hospitals, urgent care, fire and police stations (OpenStreetMap)
+* crime_agencies_pa.json - PA police agencies with locations (FBI), so each search
+  spends its limited FBI API requests only on crime rates
 
 Each file is built independently; a failure in one doesn't stop the others.
 """
@@ -288,7 +290,32 @@ def previous_copy(name: str) -> dict:
     return resp.json()
 
 
-def write(out_dir: Path, name: str, data: dict) -> None:
+CDE_AGENCIES_URL = "https://api.usa.gov/crime/fbi/cde/agency/byStateAbbr/PA"
+
+
+def parse_agencies(data) -> list:
+    """FBI agency list (grouped by county) -> [[ori, name, lat, lon], ...] for agencies with a location."""
+    groups = data.values() if isinstance(data, dict) else [data]
+    out = []
+    for group in groups:
+        for a in group if isinstance(group, list) else []:
+            if a.get("ori") and a.get("latitude") is not None and a.get("longitude") is not None:
+                out.append([a["ori"], a.get("agency_name") or a["ori"],
+                            round(float(a["latitude"]), 5), round(float(a["longitude"]), 5)])
+    return out
+
+
+def build_agencies() -> list:
+    key = os.environ.get("DATA_GOV_API_KEY") or "DEMO_KEY"
+    resp = requests.get(CDE_AGENCIES_URL, params={"API_KEY": key}, headers=HEADERS, timeout=120)
+    resp.raise_for_status()
+    agencies = parse_agencies(resp.json())
+    if not agencies:
+        raise ValueError("FBI agency list was empty")
+    return agencies
+
+
+def write(out_dir: Path, name: str, data) -> None:
     path = out_dir / name
     path.write_text(json.dumps(data, separators=(",", ":")))
     print(f"wrote {path} ({path.stat().st_size / 1e6:.2f} MB)")
@@ -309,6 +336,7 @@ def main(out: str = "docs/data") -> int:
         ("acs_pa.json", build_acs),
         ("zcta_pa.json", lambda: build_zcta(rows.get("zhvi"))),
         ("emergency_pa.json", build_emergency),
+        ("crime_agencies_pa.json", build_agencies),
     ):
         try:
             write(out_dir, name, builder())

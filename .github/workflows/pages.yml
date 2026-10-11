@@ -35,6 +35,8 @@ jobs:
         env:
           # Optional repo secret; without it the build falls back to Census Reporter.
           CENSUS_API_KEY: ${{ secrets.CENSUS_API_KEY }}
+          # Optional repo secret for the FBI agency list; DEMO_KEY is enough for this one call.
+          DATA_GOV_API_KEY: ${{ secrets.DATA_GOV_API_KEY }}
           # Fallback: reuse a file from the live site if its source is down right now.
           PREVIOUS_SITE_URL: ${{ steps.pages.outputs.base_url }}
         run: python scripts/build_site_data.py docs/data

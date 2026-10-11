@@ -9,6 +9,7 @@ globalThis.fetch = async (url, opts = {}) => {
   for (const [match, body] of routes) {
     if (u.includes(match)) {
       const data = typeof body === "function" ? body(u, opts) : body;
+      if (data && data.__status) return { ok: false, status: data.__status, json: async () => ({}) };
       return { ok: true, status: 200, json: async () => data };
     }
   }
@@ -48,6 +49,7 @@ routes.push(
     { ori: "PA0460800", agency_name: "Lower Merion Township Police Department", latitude: LAT + 0.01, longitude: LON },
     { ori: "PAPSP0000", agency_name: "Pennsylvania State Police: Norristown", latitude: LAT, longitude: LON },
   ] }],
+  ["/summarized/agency/PA0000429", { __status: 429 }],
   ["/summarized/agency/", (u) => {
     const year = new URL(u).searchParams.get("from").slice(-4);
     if (year !== String(new Date().getFullYear() - 1)) return { offenses: { rates: {} } };
@@ -149,4 +151,13 @@ test("flood and escaping", async () => {
 
 test("safety links include Ring Neighbors", () => {
   assert.equal(app.SAFETY_LINKS["Ring Neighbors"], "https://neighbors.ring.com/");
+});
+
+test("crime uses the prebuilt agency list and reports rate limits clearly", async () => {
+  routes.unshift(["data/crime_agencies_pa.json", [
+    ["PA0000429", "Rate Limited Borough Police Department", LAT + 0.02, LON],
+    ["PAFAR0001", "Far Away PD", LAT + 2, LON],
+  ]]);
+  const loc = { zip: "19011", lat: LAT, lon: LON, place: "x", county: "", countyFips: "" };
+  await assert.rejects(app.fetchCrime(loc, {}), /demo key allows only about 30 requests an hour/);
 });

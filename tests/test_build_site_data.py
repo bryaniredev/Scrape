@@ -102,8 +102,17 @@ def test_main_keeps_previous_copy_when_a_source_is_down(monkeypatch, tmp_path):
     monkeypatch.setattr(bsd, "build_acs", lambda: {"zips": {}})
     monkeypatch.setattr(bsd, "build_zcta", lambda rows: {"19010": [40, -75, rows["19010"]["city"]]})
     monkeypatch.setattr(bsd, "build_emergency", down)
+    monkeypatch.setattr(bsd, "build_agencies", lambda: [["PA1", "PD", 40.0, -75.0]])
     monkeypatch.setattr(bsd, "previous_copy", lambda name: {"hospital": [[1, 2, "Kept", ""]]})
     assert bsd.main(str(tmp_path)) == 0
     import json
     assert json.loads((tmp_path / "emergency_pa.json").read_text())["hospital"][0][2] == "Kept"
     assert json.loads((tmp_path / "zcta_pa.json").read_text())["19010"][2] == "Bryn Mawr"
+
+
+def test_parse_agencies():
+    data = {"MONTGOMERY": [
+        {"ori": "PA0460800", "agency_name": "Lower Merion Township Police Department", "latitude": 40.0123456, "longitude": "-75.3"},
+        {"ori": "PA0000000", "agency_name": "No location"},
+    ], "OTHER": "unexpected"}
+    assert bsd.parse_agencies(data) == [["PA0460800", "Lower Merion Township Police Department", 40.01235, -75.3]]

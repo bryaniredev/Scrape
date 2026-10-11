@@ -29,7 +29,11 @@ export async function getJSON(url, { params, headers, method = "GET", body, time
   } finally {
     clearTimeout(timer);
   }
-  if (!resp.ok) throw new SourceError(`${new URL(url).host} returned HTTP ${resp.status}`);
+  if (!resp.ok) {
+    const err = new SourceError(`${new URL(url).host} returned HTTP ${resp.status}`);
+    err.status = resp.status;
+    throw err;
+  }
   let data;
   try { data = await resp.json(); } catch { throw new SourceError(`${new URL(url).host} did not return JSON`); }
   cache.set(cacheKey, data);
@@ -329,9 +333,29 @@ export async function fetchSchools(loc) {
 }
 
 // ---------------------------------------------------------------- crime (FBI CDE)
+// The FBI API is rate-limited (the shared DEMO_KEY allows ~30 requests/hour), so a search
+// spends as few requests as possible: the agency list is prebuilt, results are cached in the
+// browser for a week, and the working data year / offense code are remembered.
 
 const CDE = "https://api.usa.gov/crime/fbi/cde";
 const OFFENSES = { violent: ["V", "violent-crime"], property: ["P", "property-crime"] };
+const CRIME_CACHE_DAYS = 7;
+const MAX_AGENCIES = 3;
+
+export class RateLimited extends SourceError {}
+
+// Small localStorage cache; every access is wrapped because storage can be blocked.
+const store = {
+  get(key) {
+    try {
+      const item = JSON.parse(localStorage.getItem(`pahs:${key}`));
+      return item && item.expires > Date.now() ? item.value : undefined;
+    } catch { return undefined; }
+  },
+  set(key, value, days) {
+    try { localStorage.setItem(`pahs:${key}`, JSON.stringify({ value, expires: Date.now() + days * 864e5 })); } catch { /* ignore */ }
+  },
+};
 
 function classifySeries(series, agencyName) {
   const name = series.toLowerCase();
@@ -348,54 +372,111 @@ export function annualRate(monthly, year) {
   return [round((vals.reduce((a, b) => a + b, 0) / vals.length) * 12, 1), vals.length];
 }
 
-async function offenseRates(ori, agencyName, codes, year, apiKey) {
+export function parseRates(data, agencyName, year) {
+  const out = {};
+  for (const [series, monthly] of Object.entries(data?.offenses?.rates || {})) {
+    const kind = classifySeries(series, agencyName);
+    if (!kind || typeof monthly !== "object") continue;
+    const [rate, months] = annualRate(monthly, year);
+    if (rate != null) { out[kind] = rate; if (kind === "agency") out.months = months; }
+  }
+  return "agency" in out ? out : null;
+}
+
+async function offenseRates(ori, agencyName, label, year, apiKey) {
+  const cacheKey = `cde:${ori}:${label}:${year}`;
+  const cached = store.get(cacheKey);
+  if (cached !== undefined) return cached;
+  const known = store.get(`cde:code:${label}`);
+  const codes = known ? [known, ...OFFENSES[label].filter((c) => c !== known)] : OFFENSES[label];
   for (const code of codes) {
     let data;
     try {
       data = await getJSON(`${CDE}/summarized/agency/${ori}/${code}`, { params: { API_KEY: apiKey, from: `01-${year}`, to: `12-${year}` } });
-    } catch { continue; }
-    const out = {};
-    for (const [series, monthly] of Object.entries(data?.offenses?.rates || {})) {
-      const kind = classifySeries(series, agencyName);
-      if (!kind || typeof monthly !== "object") continue;
-      const [rate, months] = annualRate(monthly, year);
-      if (rate != null) { out[kind] = rate; if (kind === "agency") out.months = months; }
+    } catch (err) {
+      if (err.status === 429) throw new RateLimited("rate limited");
+      continue;
     }
-    if ("agency" in out) return out;
+    store.set(`cde:code:${label}`, code, 30);
+    const rates = parseRates(data, agencyName, year);
+    store.set(cacheKey, rates, CRIME_CACHE_DAYS); // cache "no data" too, so it isn't re-asked
+    return rates;
   }
   return null;
 }
 
+async function crimeAgencies(apiKey) {
+  try {
+    return await loadData("crime_agencies_pa.json");
+  } catch { /* fall back to the live API (one request), cached for 30 days */ }
+  const cached = store.get("cde:agencies");
+  if (cached) return cached;
+  let data;
+  try {
+    data = await getJSON(`${CDE}/agency/byStateAbbr/PA`, { params: { API_KEY: apiKey } });
+  } catch (err) {
+    if (err.status === 429) throw new RateLimited("rate limited");
+    throw err;
+  }
+  const groups = Array.isArray(data) ? [data] : Object.values(data || {});
+  const list = groups.flatMap((g) => (Array.isArray(g) ? g : []))
+    .filter((a) => a.ori && a.latitude != null && a.longitude != null)
+    .map((a) => [a.ori, a.agency_name || a.ori, +a.latitude, +a.longitude]);
+  store.set("cde:agencies", list, 30);
+  return list;
+}
+
+const RATE_LIMIT_HELP = "The FBI crime API's shared demo key allows only about 30 requests an hour, and that limit has been reached. "
+  + "It resets within the hour, or add your own free key (instant, 1,000 requests/hour) with the “API key” button at the top.";
+
 export async function fetchCrime(loc, keys) {
   const apiKey = keys.datagov || "DEMO_KEY";
-  const data = await getJSON(`${CDE}/agency/byStateAbbr/PA`, { params: { API_KEY: apiKey } });
-  const groups = Array.isArray(data) ? [data] : Object.values(data || {});
-  const agencies = groups.flatMap((g) => (Array.isArray(g) ? g : []))
-    .filter((a) => a.ori && a.latitude != null && a.longitude != null)
-    .map((a) => ({ ori: a.ori, name: a.agency_name || a.ori, miles: round(haversineMiles(loc.lat, loc.lon, +a.latitude, +a.longitude), 1) }))
+  let list;
+  try {
+    list = await crimeAgencies(apiKey);
+  } catch (err) {
+    throw err instanceof RateLimited ? new SourceError(RATE_LIMIT_HELP) : err;
+  }
+  const agencies = list
+    .map(([ori, name, lat, lon]) => ({ ori, name, miles: round(haversineMiles(loc.lat, loc.lon, lat, lon), 1) }))
     .filter((a) => a.miles <= 15)
     // local departments before State Police barracks, then nearest first
     .sort((a, b) => (/state police/i.test(a.name) - /state police/i.test(b.name)) || a.miles - b.miles);
   if (!agencies.length) throw new SourceError("No reporting police agencies found nearby.");
+
   const thisYear = new Date().getFullYear();
+  const knownYear = store.get("cde:year");
+  const years = knownYear ? [knownYear] : [thisYear - 1, thisYear - 2, thisYear - 3];
   const results = [], cmp = {};
-  let dataYear = null;
-  for (const agency of agencies) {
-    if (results.length >= 3) break;
-    for (const year of dataYear ? [dataYear] : [thisYear - 1, thisYear - 2, thisYear - 3]) {
-      const entry = {};
-      for (const [label, codes] of Object.entries(OFFENSES)) {
-        const r = await offenseRates(agency.ori, agency.name, codes, year, apiKey);
-        if (!r) continue;
-        entry[label] = r.agency; entry.months = r.months;
-        cmp[`${label}Pa`] ??= r.pa; cmp[`${label}Us`] ??= r.us;
+  let dataYear = knownYear || null, limited = false;
+  try {
+    for (const agency of agencies) {
+      if (results.length >= MAX_AGENCIES) break;
+      for (const year of dataYear ? [dataYear] : years) {
+        const entry = {};
+        for (const label of Object.keys(OFFENSES)) {
+          const r = await offenseRates(agency.ori, agency.name, label, year, apiKey);
+          if (!r) continue;
+          entry[label] = r.agency; entry.months = r.months;
+          cmp[`${label}Pa`] ??= r.pa; cmp[`${label}Us`] ??= r.us;
+        }
+        if (Object.keys(entry).length) {
+          if (!dataYear) store.set("cde:year", year, 7);
+          dataYear = year;
+          results.push({ ...agency, ...entry });
+          break;
+        }
       }
-      if (Object.keys(entry).length) { dataYear = year; results.push({ ...agency, ...entry }); break; }
     }
+  } catch (err) {
+    if (!(err instanceof RateLimited)) throw err;
+    limited = true;
   }
-  if (!results.length) throw new SourceError("FBI Crime Data Explorer returned no data for nearby agencies (DEMO_KEY may be rate-limited; add a free api.data.gov key).");
+  if (!results.length) {
+    throw new SourceError(limited ? RATE_LIMIT_HELP : "FBI Crime Data Explorer returned no data for nearby agencies.");
+  }
   return {
-    year: dataYear, agencies: results,
+    year: dataYear, agencies: results, note: limited ? RATE_LIMIT_HELP : "",
     pa: { violent: cmp.violentPa ?? null, property: cmp.propertyPa ?? null },
     us: { violent: cmp.violentUs ?? null, property: cmp.propertyUs ?? null },
   };
@@ -543,7 +624,8 @@ function renderCrime(cr) {
       <td class="r ${above(a.violent, cr.pa.violent)}">${num(a.violent)}</td><td class="r ${above(a.property, cr.pa.property)}">${num(a.property)}</td></tr>`).join("")}
     <tr><td><em>Pennsylvania</em></td><td class="r">${num(cr.pa.violent)}</td><td class="r">${num(cr.pa.property)}</td></tr>
     <tr><td><em>United States</em></td><td class="r">${num(cr.us.violent)}</td><td class="r">${num(cr.us.property)}</td></tr></table>
-    <p class="muted small">Agency figures cover the whole jurisdiction, not just this ZIP. Red = above the PA rate.</p>`;
+    <p class="muted small">Agency figures cover the whole jurisdiction, not just this ZIP. Red = above the PA rate.</p>
+    ${cr.note ? `<p class="unavail small">Some agencies are missing: ${esc(cr.note)}</p>` : ""}`;
 }
 
 export const SAFETY_LINKS = {

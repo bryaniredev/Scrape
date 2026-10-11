@@ -31,8 +31,10 @@ What the website shows, and where it comes from:
 - **Prebuilt at deploy time** (no browser calls, so no CORS or API keys needed): Zillow home values,
   Census neighborhood profile, ZIP code locations (for "ZIPs within N minutes") and the nearest
   hospitals, urgent care, fire and police stations (OpenStreetMap). The workflow refreshes these weekly.
-- **Live from the browser:** schools (NCES), crime (FBI; add a free api.data.gov key under **API key**
-  if it's rate-limited) and the FEMA flood zone.
+- **Live from the browser:** schools (NCES), crime (FBI) and the FEMA flood zone. The FBI API is
+  rate-limited: without your own key the shared DEMO_KEY allows ~30 requests/hour. A search uses up to
+  6 (results are cached in your browser for a week), so add a free api.data.gov key under **API key** if you
+  research many ZIPs.
 - **Links, filtered for you:** homes for sale on Zillow, Redfin and Realtor.com for your ZIP and every ZIP
   within your drive time, with your max price and minimum beds applied; Google Maps searches for local
   amenities; Google Maps, Yelp and Tripadvisor for restaurants; and Google Maps, Yelp and BBB for home
