@@ -7,11 +7,23 @@
 <meta name="description" content="Research any Pennsylvania ZIP code before you buy: home values, listings, schools, crime, amenities and flood risk.">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="style.css">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#2457c5">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
 <body>
 <header>
   <div class="wrap">
     <h1>PA Home Scout</h1>
+    <nav class="tabs" role="tablist" aria-label="Views">
+      <button type="button" role="tab" data-tab="report" aria-selected="true">Neighborhood report</button>
+      <button type="button" role="tab" data-tab="homes" aria-selected="false">My homes<span id="homes-count"></span></button>
+    </nav>
+  </div>
+</header>
+<main class="wrap">
+  <div id="report-view">
     <p class="muted">Enter a Pennsylvania ZIP code to research home prices, listings, schools, safety and amenities.</p>
     <form id="search">
       <label>ZIP code<input id="zip" name="zip" inputmode="numeric" pattern="\d{5}" maxlength="5" placeholder="e.g. 19103" required autofocus></label>
@@ -31,11 +43,43 @@
       </div>
       <button type="button" id="save-keys">Save key</button> <span id="keys-saved" class="small muted"></span>
     </section>
+    <div id="status" role="status" aria-live="polite"></div>
+    <div id="report"></div>
   </div>
-</header>
-<main class="wrap">
-  <div id="status" role="status" aria-live="polite"></div>
-  <div id="report"></div>
+
+  <div id="homes-view" hidden>
+    <section class="card">
+      <h2>Saved homes</h2>
+      <form id="add-home" class="add-home">
+        <label class="grow">Paste a Zillow, Redfin or Realtor.com link, or type an address
+          <input id="add-input" autocomplete="off" placeholder="https://www.zillow.com/homedetails/… or 123 Main St, Bryn Mawr, PA 19010"></label>
+        <button type="submit">Add</button>
+      </form>
+      <div id="homes-msg" role="status" aria-live="polite"></div>
+      <div id="homes-list"></div>
+    </section>
+
+    <section class="card" id="route-card" hidden>
+      <h2>Plan a viewing route</h2>
+      <p class="muted small">Tick the homes you want to visit above, choose where to start, and get the most efficient order.</p>
+      <div class="route-opts">
+        <label class="grow">Start from<select id="route-start"></select></label>
+        <label class="check"><input type="checkbox" id="route-round"> Return to the start</label>
+        <button type="button" id="route-go">Plan route</button>
+      </div>
+      <div id="route-result" aria-live="polite"></div>
+    </section>
+
+    <section class="card">
+      <h2>Adding homes from listing sites</h2>
+      <ul class="notes small">
+        <li><strong>Android:</strong> open this site in Chrome, tap <em>⋮ → Add to Home screen</em> (or <em>Install app</em>). After that, <strong>PA Home Scout</strong> appears in the <em>Share</em> menu of the Zillow, Redfin and Realtor.com apps and of Chrome – share a listing to it and it's added here.</li>
+        <li><strong>Computer:</strong> drag this button to your bookmarks bar: <a id="bookmarklet" class="button" href="#">+ PA Home Scout</a>. Then click the bookmark while viewing any listing.</li>
+        <li><strong>iPhone / iPad:</strong> Apple doesn't let websites appear in the Share menu. In the listing app tap <em>Share → Copy Link</em> (or <em>Copy</em>), then paste it into the box above.</li>
+        <li>Your list is saved in this browser only. Use <em>Copy list link</em> to move it to another device.</li>
+      </ul>
+    </section>
+  </div>
 </main>
 <footer class="wrap small muted">
   Data: Zillow ZHVI, US Census ACS &amp; Gazetteer, NCES / Urban Institute Education Data, FBI Crime Data Explorer, OpenStreetMap, FEMA. Listing, amenity and service links go to Zillow, Redfin, Realtor.com, Google Maps, Yelp and BBB.

@@ -42,6 +42,15 @@ What the website shows, and where it comes from:
 - Monthly cost updates live as you change the rate or down payment. Each search updates the URL, so a
   report can be shared or bookmarked.
 
+**My homes tab:** save listings and plan a viewing route.
+- Add homes by sharing a listing to the site (Android, after *Add to Home screen*), with the
+  "+ PA Home Scout" bookmarklet (desktop), or by pasting a Zillow / Redfin / Realtor.com link or an
+  address (any device, including iPhone).
+- Tick the homes to visit, pick a start (your location, a home, or wherever is most efficient), and
+  the site works out the shortest driving order (OpenStreetMap geocoding + OSRM drive times), then opens
+  the trip in Google Maps (split into parts of 10 stops, Google's limit per route).
+- The list lives in your browser; "Copy list link" moves it to another device.
+
 To preview locally: `python scripts/build_site_data.py && python -m http.server -d docs`.
 
 ## Python app setup

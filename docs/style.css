@@ -58,3 +58,28 @@ svg.spark polyline { fill: none; stroke: var(--accent); stroke-width: 2; vector-
 .links a + a { margin-left: 0; }
 td .links a { margin: 0 10px 0 0; }
 #emergency-card td.r { white-space: nowrap; }
+.tabs { display: flex; gap: 4px; margin: 12px 0 0; border-bottom: 1px solid var(--line); }
+.tabs button { background: transparent; color: var(--muted); border-radius: 8px 8px 0 0; padding: 8px 14px; border-bottom: 2px solid transparent; }
+.tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+#report-view > p.muted:first-child { margin-top: 12px; }
+#homes-view { margin-top: 16px; display: grid; gap: 16px; }
+#homes-view[hidden], #report-view[hidden] { display: none; }
+.add-home, .route-opts { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-bottom: 10px; }
+.grow { flex: 1 1 260px; }
+.grow input, .grow select { width: 100%; }
+select { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); }
+label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--text); padding-bottom: 8px; }
+label.check input { width: auto; }
+#homes-msg { min-height: 1.2em; margin-bottom: 8px; font-size: 14px; }
+#homes-msg.ok { color: var(--good); } #homes-msg.error { color: var(--bad); }
+.homes-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.homes-actions button { padding: 5px 10px; font-size: 13px; }
+ul.homes { list-style: none; margin: 0; padding: 0; }
+ul.homes li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.home-row { flex-direction: row; align-items: flex-start; gap: 10px; color: var(--text); font-size: 15px; flex: 1 1 280px; min-width: 0; }
+.home-row input { width: auto; margin-top: 4px; }
+.home-row > span { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.home-links { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.link-btn { background: none; color: var(--bad); padding: 0; font-size: 13px; text-decoration: underline; }
+a.button { display: inline-block; padding: 9px 16px; border-radius: 8px; background: var(--accent); color: #fff; text-decoration: none; margin: 4px 6px 4px 0; }
+ol.route { padding-left: 22px; } ol.route li { margin-bottom: 4px; }

@@ -1,3 +1,5 @@
+import { initHomes } from "./homes.js";
+
 // PA Home Scout - browser version. Runs entirely client-side so it can be
 // hosted on GitHub Pages; every data source is called directly from the page.
 
@@ -797,6 +799,7 @@ async function run() {
   setStatus(`Looking up ${zip}…`);
   button.disabled = true;
   const url = new URL(location.href);
+  url.hash = "";
   url.searchParams.set("zip", zip);
   url.searchParams.set("drive", drive);
   for (const [k, v] of [["maxprice", filters.maxPrice], ["minbeds", filters.minBeds]]) {
@@ -885,8 +888,10 @@ function init() {
   for (const id of ["rate", "down"]) document.getElementById(id).addEventListener("input", refreshCosts);
   const params = new URLSearchParams(location.search);
   for (const id of ["drive", "maxprice", "minbeds"]) if (params.get(id)) document.getElementById(id).value = params.get(id);
+  initHomes();
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
   const zip = params.get("zip");
-  if (zip) { document.getElementById("zip").value = zip; run(); }
+  if (zip && !location.hash.startsWith("#homes")) { document.getElementById("zip").value = zip; run(); }
 }
 
 if (typeof document !== "undefined") init();

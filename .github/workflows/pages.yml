@@ -26,7 +26,7 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt pytest
       - run: python -m pytest -q
-      - run: node --test tests/site.test.mjs
+      - run: node --test tests/site.test.mjs tests/homes.test.mjs
       - id: pages
         uses: actions/configure-pages@v5
       - name: Build site data (Zillow, Census, ZIP locations, emergency services)
@@ -44,7 +44,9 @@ jobs:
         run: |
           v="${GITHUB_SHA::8}"
           sed -i "s#src=\"app.js\"#src=\"app.js?v=$v\"#; s#href=\"style.css\"#href=\"style.css?v=$v\"#" docs/index.html
+          sed -i "s#from \"./homes.js\"#from \"./homes.js?v=$v\"#" docs/app.js
           grep -q "app.js?v=$v" docs/index.html
+          grep -q "homes.js?v=$v" docs/app.js
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs
