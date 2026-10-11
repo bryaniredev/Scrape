@@ -30,6 +30,9 @@ jobs:
       - name: Build site data (Zillow, Census, ZIP locations, emergency services)
         # Each file is built independently; anything that fails shows a notice on the site.
         continue-on-error: true
+        env:
+          # Optional repo secret; without it the build falls back to Census Reporter.
+          CENSUS_API_KEY: ${{ secrets.CENSUS_API_KEY }}
         run: python scripts/build_site_data.py docs/data
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

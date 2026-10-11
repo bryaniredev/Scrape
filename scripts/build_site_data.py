@@ -79,7 +79,12 @@ def _census(year: int, dataset: str, variables: dict, geo: str) -> list:
     resp = requests.get(f"https://api.census.gov/data/{year}/{dataset}", params=params,
                         headers=HEADERS, timeout=300)
     resp.raise_for_status()
-    return resp.json()
+    try:
+        return resp.json()
+    except ValueError:
+        # Census answers some failures (e.g. key problems) with an HTML page and HTTP 200.
+        snippet = " ".join(resp.text.split())[:160]
+        raise ValueError(f"HTTP {resp.status_code}, not JSON: {snippet!r}") from None
 
 
 def parse_acs(rows: list, variables: dict, geo_col: str) -> dict:
@@ -92,7 +97,73 @@ def parse_acs(rows: list, variables: dict, geo_col: str) -> dict:
     return out
 
 
+# Census Reporter (censusreporter.org) serves the same ACS tables with no key. Used when the
+# Census API itself fails. Table -> {variable column: app key}
+REPORTER_URL = "https://api.censusreporter.org/1.0/data/show/latest"
+REPORTER_TABLES = {
+    "B25077": {"B25077001": "medianHomeValue"},
+    "B25064": {"B25064001": "medianRent"},
+    "B19013": {"B19013001": "medianIncome"},
+    "B01003": {"B01003001": "population"},
+    "B01002": {"B01002001": "medianAge"},
+    "B25003": {"B25003001": "occupied", "B25003002": "ownerOccupied"},
+    "B25002": {"B25002001": "housingUnits", "B25002003": "vacant"},
+    "B25035": {"B25035001": "medianYearBuilt"},
+    "B25103": {"B25103001": "medianTaxes"},
+    "B17001": {"B17001001": "povertyUniverse", "B17001002": "belowPoverty"},
+    "B15003": {"B15003001": "pop25", "B15003022": "bachelors", "B15003023": "masters",
+               "B15003024": "professional", "B15003025": "doctorate"},
+    # mean commute = aggregate travel time / workers who commute
+    "B08013": {"B08013001": "_travelTime"},
+    "B08303": {"B08303001": "_commuters"},
+}
+
+
+def parse_reporter(payload: dict, columns: dict, out: dict) -> None:
+    """Merge one Census Reporter table response into {geoid: {key: value}}."""
+    for geoid, tables in (payload.get("data") or {}).items():
+        for table in tables.values():
+            estimate = table.get("estimate") or {}
+            row = out.setdefault(geoid, {})
+            for col, key in columns.items():
+                row[key] = _num(estimate.get(col))
+
+
+def finish_reporter_row(row: dict) -> dict:
+    travel, commuters = row.pop("_travelTime", None), row.pop("_commuters", None)
+    row["commuteMinutes"] = round(travel / commuters, 1) if travel and commuters else None
+    return row
+
+
+def build_acs_reporter() -> dict:
+    out, year = {}, None
+    for table, columns in REPORTER_TABLES.items():
+        resp = requests.get(REPORTER_URL, params={"table_ids": table, "geo_ids": "860|04000US42,04000US42"},
+                            headers=HEADERS, timeout=300)
+        resp.raise_for_status()
+        payload = resp.json()
+        if "error" in payload:
+            raise ValueError(f"Census Reporter {table}: {payload['error']}")
+        parse_reporter(payload, columns, out)
+        release = (payload.get("release") or {}).get("id", "")  # e.g. "acs2023_5yr"
+        if release[3:7].isdigit():
+            year = int(release[3:7])
+    zips = {g[-5:]: finish_reporter_row(r) for g, r in out.items() if g.startswith("86000US") and is_pa_zip(g[-5:])}
+    if not zips:
+        raise ValueError("Census Reporter returned no PA ZIP data")
+    return {"year": year, "zips": zips, "pa": finish_reporter_row(out.get("04000US42", {})),
+            "source": "Census Reporter"}
+
+
 def build_acs() -> dict:
+    try:
+        return build_acs_census()
+    except RuntimeError as exc:
+        print(f"Census API failed, falling back to Census Reporter: {exc}")
+    return build_acs_reporter()
+
+
+def build_acs_census() -> dict:
     errors = []
     for year in ACS_YEARS:
         try:

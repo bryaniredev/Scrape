@@ -28,7 +28,7 @@ def test_build_acs_filters_to_pa(monkeypatch):
         return [names + [col]] + [["1"] * len(names) + [i] for i in ids]
 
     monkeypatch.setattr(bsd, "_census", fake)
-    data = bsd.build_acs()
+    data = bsd.build_acs_census()
     assert data["year"] == 2024
     assert sorted(data["zips"]) == ["15001", "19010"]
     assert data["zips"]["19010"]["commuteMinutes"] == 1 and data["pa"]["population"] == 1
@@ -54,3 +54,39 @@ def test_parse_emergency():
     assert out["hospital"] == [[40.03, -75.32, "Bryn Mawr Hospital", "130 S Bryn Mawr Ave, Bryn Mawr", 1]]
     assert out["fire"] == [[40.0, -75.3, "Station 1", ""]]
     assert len(out["urgent"]) == 1 and len(out["police"]) == 1
+
+
+def test_census_reporter_fallback(monkeypatch):
+    def census_down(*a, **k):
+        raise ValueError("HTTP 200, not JSON: '<html>Invalid Key</html>'")
+
+    class Resp:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.payload
+
+    def fake_get(url, params, headers, timeout):
+        table = params["table_ids"]
+        cols = bsd.REPORTER_TABLES[table]
+        est = {c: 100 for c in cols}
+        if table == "B08013":
+            est = {"B08013001": 2910}
+        return Resp({"release": {"id": "acs2023_5yr"}, "data": {
+            "86000US19010": {table: {"estimate": est}},
+            "86000US07030": {table: {"estimate": est}},
+            "04000US42": {table: {"estimate": est}},
+        }})
+
+    monkeypatch.setattr(bsd, "_census", census_down)
+    monkeypatch.setattr(bsd.requests, "get", fake_get)
+    data = bsd.build_acs()
+    assert data["year"] == 2023 and data["source"] == "Census Reporter"
+    assert list(data["zips"]) == ["19010"]
+    row = data["zips"]["19010"]
+    assert row["medianHomeValue"] == 100 and row["commuteMinutes"] == 29.1
+    assert "_travelTime" not in row and data["pa"]["population"] == 100
