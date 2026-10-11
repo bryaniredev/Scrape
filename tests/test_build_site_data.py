@@ -72,6 +72,8 @@ def test_census_reporter_fallback(monkeypatch):
 
     def fake_get(url, params, headers, timeout):
         table = params["table_ids"]
+        if table == "B08303":  # a table the API rejects is skipped, not fatal
+            raise bsd.requests.HTTPError("400 Client Error: Bad Request")
         cols = bsd.REPORTER_TABLES[table]
         est = {c: 100 for c in cols}
         if table == "B08013":
@@ -88,5 +90,5 @@ def test_census_reporter_fallback(monkeypatch):
     assert data["year"] == 2023 and data["source"] == "Census Reporter"
     assert list(data["zips"]) == ["19010"]
     row = data["zips"]["19010"]
-    assert row["medianHomeValue"] == 100 and row["commuteMinutes"] == 29.1
+    assert row["medianHomeValue"] == 100 and row["commuteMinutes"] is None
     assert "_travelTime" not in row and data["pa"]["population"] == 100

@@ -83,29 +83,6 @@ export async function geocode(zip) {
 
 // ---------------------------------------------------------------- Census ACS
 
-const ACS_YEARS = [2024, 2023, 2022];
-const DETAIL_VARS = {
-  B25077_001E: "medianHomeValue", B25064_001E: "medianRent", B19013_001E: "medianIncome",
-  B01003_001E: "population", B01002_001E: "medianAge", B25003_001E: "occupied",
-  B25003_002E: "ownerOccupied", B25002_001E: "housingUnits", B25002_003E: "vacant",
-  B25035_001E: "medianYearBuilt", B25103_001E: "medianTaxes", B17001_001E: "povertyUniverse",
-  B17001_002E: "belowPoverty", B15003_001E: "pop25", B15003_022E: "bachelors",
-  B15003_023E: "masters", B15003_024E: "professional", B15003_025E: "doctorate",
-};
-const PROFILE_VARS = { DP03_0025E: "commuteMinutes" };
-
-const acsNum = (v) => { const n = parseFloat(v); return Number.isNaN(n) || n < -1 ? null : n; };
-
-async function acsQuery(year, dataset, vars, geo, key) {
-  const params = { get: Object.keys(vars).join(","), for: geo };
-  if (key) params.key = key;
-  const rows = await getJSON(`https://api.census.gov/data/${year}/${dataset}`, { params });
-  if (!Array.isArray(rows) || rows.length < 2) throw new SourceError(`no ACS ${year} data`);
-  const out = {};
-  rows[0].forEach((name, i) => { if (vars[name]) out[vars[name]] = acsNum(rows[1][i]); });
-  return out;
-}
-
 export function deriveAcs(raw) {
   const pct = (n, d) => (n == null || !d ? null : round((100 * n) / d, 1));
   const deg = [raw.bachelors, raw.masters, raw.professional, raw.doctorate];
@@ -119,27 +96,6 @@ export function deriveAcs(raw) {
     taxRatePct: raw.medianTaxes && raw.medianHomeValue ? round((100 * raw.medianTaxes) / raw.medianHomeValue, 2) : null,
   };
 }
-
-async function acsFor(geo, key) {
-  const errors = [];
-  for (const year of ACS_YEARS) {
-    let raw;
-    try { raw = await acsQuery(year, "acs/acs5", DETAIL_VARS, geo, key); } catch (e) { errors.push(e.message); continue; }
-    try { Object.assign(raw, await acsQuery(year, "acs/acs5/profile", PROFILE_VARS, geo, key)); } catch { raw.commuteMinutes = null; }
-    return { year, data: deriveAcs(raw) };
-  }
-  throw new SourceError(`Census ACS unavailable: ${errors.join("; ")}`);
-}
-
-// Live API fallback, used only if the prebuilt data/acs_pa.json is missing.
-async function fetchAcsLive(zip) {
-  const [area, state] = await Promise.all([
-    acsFor(`zip code tabulation area:${zip}`),
-    acsFor("state:42").catch(() => ({ data: {} })),
-  ]);
-  return { year: area.year, zip: area.data, pa: state.data };
-}
-
 
 // ---------------------------------------------------------------- prebuilt data files
 // Built at deploy time by scripts/build_site_data.py (see .github/workflows/pages.yml).
@@ -157,12 +113,7 @@ export function loadData(name) {
 }
 
 export async function fetchAcs(zip) {
-  let data;
-  try {
-    data = await loadData("acs_pa.json");
-  } catch {
-    return fetchAcsLive(zip);
-  }
+  const data = await loadData("acs_pa.json");
   const raw = data.zips?.[zip];
   if (!raw) throw new SourceError(`The Census doesn't publish neighborhood data for ZIP ${zip} (often a PO-box-only ZIP).`);
   return { year: data.year, zip: deriveAcs(raw), pa: deriveAcs(data.pa || {}) };

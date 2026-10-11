@@ -136,21 +136,27 @@ def finish_reporter_row(row: dict) -> dict:
 
 
 def build_acs_reporter() -> dict:
-    out, year = {}, None
+    out, year, skipped = {}, None, []
     for table, columns in REPORTER_TABLES.items():
-        resp = requests.get(REPORTER_URL, params={"table_ids": table, "geo_ids": "860|04000US42,04000US42"},
-                            headers=HEADERS, timeout=300)
-        resp.raise_for_status()
-        payload = resp.json()
-        if "error" in payload:
-            raise ValueError(f"Census Reporter {table}: {payload['error']}")
+        # One table at a time so a table Census Reporter can't serve only blanks those fields.
+        try:
+            resp = requests.get(REPORTER_URL, params={"table_ids": table, "geo_ids": "860|04000US42,04000US42"},
+                                headers=HEADERS, timeout=300)
+            resp.raise_for_status()
+            payload = resp.json()
+            if "error" in payload:
+                raise ValueError(payload["error"])
+        except (requests.RequestException, ValueError) as exc:
+            skipped.append(table)
+            print(f"Census Reporter {table} skipped: {exc}")
+            continue
         parse_reporter(payload, columns, out)
         release = (payload.get("release") or {}).get("id", "")  # e.g. "acs2023_5yr"
         if release[3:7].isdigit():
             year = int(release[3:7])
     zips = {g[-5:]: finish_reporter_row(r) for g, r in out.items() if g.startswith("86000US") and is_pa_zip(g[-5:])}
     if not zips:
-        raise ValueError("Census Reporter returned no PA ZIP data")
+        raise ValueError(f"Census Reporter returned no PA ZIP data (failed tables: {', '.join(skipped)})")
     return {"year": year, "zips": zips, "pa": finish_reporter_row(out.get("04000US42", {})),
             "source": "Census Reporter"}
 
