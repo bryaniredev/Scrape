@@ -17,7 +17,25 @@ Enter a Pennsylvania ZIP code and get a one-page briefing for home buyers:
 Each section is fetched in parallel and fails independently. If a source is down or a key is
 missing, the rest of the report still renders and that section says why.
 
-## Setup
+## Website (GitHub Pages)
+
+The `docs/` folder is a browser-only version of the app that runs on GitHub Pages. It needs
+no server, because the page calls the data sources directly.
+
+**One-time setup:** in the repo, go to **Settings → Pages → Build and deployment → Source** and
+choose **GitHub Actions**. After that, every push to `master` runs the tests, builds the Zillow
+data file and deploys the site to `https://<your-user>.github.io/<repo>/`. The workflow also re-runs weekly
+to refresh Zillow values. Each search updates the URL (`?zip=19010`), so you can share a link to a report.
+
+Differences from the Python version:
+- API keys are entered on the page (**API keys** button) and stored only in your browser.
+- Yelp and GreatSchools don't allow browser calls, so restaurants come from OpenStreetMap
+  (no ratings, plus a link to Yelp's top-rated list), and schools always use the state-test score.
+- Monthly cost updates live as you change the rate or down payment.
+
+To preview locally: `python scripts/build_zhvi.py && python -m http.server -d docs`.
+
+## Python app setup
 
 ```bash
 pip install -r requirements.txt
@@ -59,7 +77,8 @@ There is also a JSON API: `GET /api/report?zip=19010&drive=20&rate=6.5&down=20`.
 
 ```bash
 pip install pytest
-python -m pytest
+python -m pytest            # Python app + data builder
+node --test tests/          # browser app (docs/app.js)
 ```
 
 The tests run offline against recorded API-shaped fixtures.
