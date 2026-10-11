@@ -89,3 +89,4 @@ details.howto ol { padding-left: 20px; } details.howto li { margin-bottom: 8px; 
 .copyrow { display: flex; gap: 8px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
 .copyrow code { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
 .copyrow button { padding: 5px 10px; font-size: 13px; }
+.link-btn.edit { color: var(--accent); }

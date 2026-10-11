@@ -118,3 +118,32 @@ test("incoming shares: raw links from an iOS Shortcut, bookmarklets, share targe
   assert.equal(h.parseShared(android).address, "123 Main St, Bryn Mawr, PA 19010");
   assert.deepEqual(h.readIncoming("?zip=19010"), { url: "", title: "", text: "" });
 });
+
+test("links without an address: ID-only, short links, double-encoded", () => {
+  assert.equal(h.addressFromUrl("https://www.zillow.com/homedetails/2073012_zpid/"), null);
+  assert.equal(h.addressFromUrl("https://www.zillow.com/homes/123-Main-St-Bryn-Mawr-PA-19010_rb/").address, "123 Main St, Bryn Mawr, PA 19010");
+  assert.equal(h.addressFromUrl("https://www.redfin.com/PA/Philadelphia/1500-Walnut-St-19102/unit-12B/home/42").address,
+    "1500 Walnut St Unit 12B, Philadelphia, PA 19102");
+  assert.equal(h.addressFromUrl("https://www.realtor.com/realestateandhomes-detail/M3412345678"), null);
+  assert.ok(h.isShortLink("https://redf.in/aBc123") && h.isShortLink("https://zillow.app.link/xyz"));
+  assert.ok(!h.isShortLink("https://www.zillow.com/homedetails/x/1_zpid/"));
+  // double-encoded link from a Shortcut
+  const twice = encodeURIComponent(encodeURIComponent("https://www.redfin.com/PA/Ardmore/9-Oak-Ave-19003/home/5"));
+  assert.equal(h.readIncoming(`?add=${twice}`).url, "https://www.redfin.com/PA/Ardmore/9-Oak-Ave-19003/home/5");
+  assert.equal(h.deepDecode("https://www.zillow.com/homedetails/a/1_zpid/?x=1%202"), "https://www.zillow.com/homedetails/a/1_zpid/?x=1%202");
+});
+
+test("an unreadable listing link is saved as 'address needed' instead of lost", () => {
+  const before = h.loadHomes().length;
+  const [msg, isErr] = h.saveShared({ url: "https://redf.in/aBc123" });
+  assert.ok(isErr && /short link/.test(msg) && /Received: https:\/\/redf\.in\/aBc123/.test(msg));
+  const saved = h.loadHomes().at(-1);
+  assert.equal(h.loadHomes().length, before + 1);
+  assert.deepEqual([saved.address, saved.url, saved.source, saved.selected], ["", "https://redf.in/aBc123", "Redfin", false]);
+  // sharing the same link again doesn't duplicate it
+  h.saveShared({ url: "https://redf.in/aBc123" });
+  assert.equal(h.loadHomes().length, before + 1);
+  const [msg2] = h.saveShared({ url: "https://www.zillow.com/homedetails/2073012_zpid/" });
+  assert.match(msg2, /doesn't include the address/);
+  assert.deepEqual(h.saveShared({ text: "hello" }), ["Couldn't find an address or a link in what was shared. Type the address in the box instead.", true]);
+});

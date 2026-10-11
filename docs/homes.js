@@ -48,12 +48,18 @@ export function addressFromUrl(raw) {
   try { u = new URL(raw); } catch { return null; }
   const host = u.hostname.replace(/^www\./, "");
   const parts = u.pathname.split("/").filter(Boolean);
-  if (host.endsWith("zillow.com") && parts[0] === "homedetails" && parts[1]) {
-    return { address: fromSlug(parts[1]), source: "Zillow" };
+  const hasStreet = (slug) => /\d/.test(slug) && /[a-z]{2}/i.test(slug.replace(/_zpid$/i, "").replace(/\d+/g, ""));
+  if (host.endsWith("zillow.com") && ["homedetails", "homes"].includes(parts[0]) && parts[1]) {
+    // /homedetails/123-Main-St-Bryn-Mawr-PA-19010/12345_zpid/ (an ID-only /homedetails/12345_zpid/ has no address)
+    const slug = parts[1].replace(/_rb$/i, "");
+    if (!/^\d+_zpid$/i.test(slug) && hasStreet(slug)) return { address: fromSlug(slug), source: "Zillow" };
+    return null;
   }
-  if (host.endsWith("redfin.com") && parts.length >= 3 && /^[A-Z]{2}$/.test(parts[0])) {
+  if (host.endsWith("redfin.com") && parts.length >= 3 && /^[A-Z]{2}$/.test(parts[0]) && parts[2] !== "home") {
+    // /PA/Bryn-Mawr/123-Main-St-19010/home/123 or /PA/City/45-Elm-St-19010/unit-2B/home/123
     const m = parts[2].match(/^(.*?)-(\d{5})$/);
-    const street = (m ? m[1] : parts[2]).replace(/-/g, " ");
+    let street = (m ? m[1] : parts[2]).replace(/-/g, " ");
+    if (/^unit-/i.test(parts[3] || "")) street += ` Unit ${parts[3].slice(5).replace(/-/g, " ")}`;
     const city = parts[1].replace(/-/g, " ");
     return { address: `${street}, ${city}, ${parts[0]}${m ? ` ${m[2]}` : ""}`, source: "Redfin" };
   }
@@ -73,8 +79,28 @@ export function addressFromUrl(raw) {
   return null;
 }
 
-const SOURCES = [["zillow.com", "Zillow"], ["redfin.com", "Redfin"], ["realtor.com", "Realtor.com"], ["trulia.com", "Trulia"], ["homes.com", "Homes.com"]];
-const sourceOf = (url) => SOURCES.find(([d]) => { try { return new URL(url).hostname.endsWith(d); } catch { return false; } })?.[1] || "";
+/** Links shared from apps are sometimes percent-encoded twice; undo that. */
+export function deepDecode(value) {
+  let v = (value || "").trim();
+  // Only while the scheme itself is still encoded ("https%3A%2F%2F…"); a normal link is left alone.
+  for (let i = 0; i < 3 && /^https?%3A/i.test(v); i++) {
+    try {
+      const next = decodeURIComponent(v);
+      if (next === v) break;
+      v = next;
+    } catch { break; }
+  }
+  return v.trim();
+}
+
+const SHORT_HOSTS = /(^|\.)(redf\.in|app\.link|bit\.ly|tinyurl\.com|t\.co|ow\.ly|goo\.gl|rdc\.link|zillow\.page\.link|rltr\.co)$/i;
+export function isShortLink(url) {
+  try { return SHORT_HOSTS.test(new URL(url).hostname); } catch { return false; }
+}
+
+const SOURCES = [["zillow.com", "Zillow"], ["zillow.app.link", "Zillow"], ["redfin.com", "Redfin"], ["redf.in", "Redfin"],
+  ["realtor.com", "Realtor.com"], ["trulia.com", "Trulia"], ["homes.com", "Homes.com"]];
+export const sourceOf = (url) => SOURCES.find(([d]) => { try { return new URL(url).hostname.endsWith(d); } catch { return false; } })?.[1] || "";
 
 /**
  * Turn whatever a share sheet / bookmarklet / paste gives us into { address, url, source }.
@@ -100,6 +126,11 @@ export function parseShared({ url = "", title = "", text = "" } = {}) {
   return null;
 }
 
+export function linkIn({ url = "", title = "", text = "" } = {}) {
+  const all = [url, text, title].filter(Boolean).join("\n");
+  return (all.match(/https?:\/\/\S+/)?.[0] || "").replace(/[)\].,;]+$/, "");
+}
+
 export const normalizeAddress = (a) => a.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 export const zipOf = (a) => a.match(/\b(\d{5})(?:-\d{4})?\s*$/)?.[1] || "";
 
@@ -120,20 +151,41 @@ function saveHomes(list) {
 /** Add a parsed listing; returns { added, item, duplicate }. */
 export function addHome(parsed) {
   const list = loadHomes();
-  const key = normalizeAddress(parsed.address);
-  const existing = list.find((h) => normalizeAddress(h.address) === key);
+  const key = normalizeAddress(parsed.address || "");
+  const existing = key
+    ? list.find((h) => h.address && normalizeAddress(h.address) === key)
+    : list.find((h) => !h.address && h.url === parsed.url);
   if (existing) {
     if (parsed.url && !existing.url) { existing.url = parsed.url; existing.source = parsed.source; saveHomes(list); }
     return { added: false, duplicate: true, item: existing };
   }
   const item = {
     id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
-    address: parsed.address, url: parsed.url || "", source: parsed.source || "",
-    added: new Date().toISOString().slice(0, 10), selected: true,
+    address: parsed.address || "", url: parsed.url || "", source: parsed.source || "",
+    added: new Date().toISOString().slice(0, 10), selected: !!parsed.address,
   };
   list.push(item);
   saveHomes(list);
   return { added: true, duplicate: false, item };
+}
+
+/**
+ * Save whatever was shared. If no address can be read but there is a listing link, the link
+ * is saved anyway as "address needed" so nothing is lost. Returns [message, isError].
+ */
+export function saveShared(shared) {
+  const parsed = parseShared(shared);
+  if (parsed) {
+    const r = addHome(parsed);
+    return [r.added ? `Added ${parsed.address}.` : `${parsed.address} is already in your list.`, false];
+  }
+  const link = linkIn(shared);
+  if (!link) return ["Couldn't find an address or a link in what was shared. Type the address in the box instead.", true];
+  addHome({ address: "", url: link, source: sourceOf(link) });
+  const why = isShortLink(link)
+    ? "it's a short link, which doesn't include the address (add the Expand URL step to your Shortcut – see below)"
+    : "this link doesn't include the address";
+  return [`Saved the listing, but ${why}. Tap “Add address” on it. Received: ${link}`, true];
 }
 
 export function updateHomes(fn) {
@@ -360,13 +412,14 @@ function renderList() {
       <button type="button" class="secondary" data-act="share">Copy list link</button>
     </div>
     <ul class="homes">${list.map((h) => `<li>
-      <label class="home-row"><input type="checkbox" data-id="${esc(h.id)}" ${h.selected ? "checked" : ""}>
-        <span><strong>${esc(h.address)}</strong>
+      <label class="home-row"><input type="checkbox" data-id="${esc(h.id)}" ${h.selected && h.address ? "checked" : ""} ${h.address ? "" : "disabled"}>
+        <span>${h.address ? `<strong>${esc(h.address)}</strong>` : `<strong class="unavail">Address needed</strong>`}
         <span class="muted small">${h.source ? `${esc(h.source)} · ` : ""}added ${esc(h.added)}${h.lat == null ? "" : " · located"}</span></span></label>
       <span class="home-links small">
         ${h.url ? `<a href="${esc(h.url)}" target="_blank" rel="noopener">Listing</a>` : ""}
         ${zipOf(h.address) ? `<a href="?zip=${zipOf(h.address)}">Scout ${zipOf(h.address)}</a>` : ""}
-        <a href="${esc(`https://www.google.com/maps/search/?${new URLSearchParams({ api: "1", query: h.address })}`)}" target="_blank" rel="noopener">Map</a>
+        ${h.address ? `<a href="${esc(`https://www.google.com/maps/search/?${new URLSearchParams({ api: "1", query: h.address })}`)}" target="_blank" rel="noopener">Map</a>` : ""}
+        <button type="button" class="link-btn edit" data-edit="${esc(h.id)}">${h.address ? "Edit" : "Add address"}</button>
         <button type="button" class="link-btn" data-remove="${esc(h.id)}" aria-label="Remove ${esc(h.address)}">Remove</button>
       </span></li>`).join("")}</ul>`;
   renderStartOptions(list);
@@ -376,12 +429,12 @@ function renderStartOptions(list) {
   const sel = $("#route-start");
   const prev = sel.value;
   sel.innerHTML = `<option value="me">My current location</option><option value="best">Wherever is most efficient</option>`
-    + list.filter((h) => h.selected).map((h) => `<option value="${esc(h.id)}">${esc(h.address)}</option>`).join("");
+    + list.filter((h) => h.selected && h.address).map((h) => `<option value="${esc(h.id)}">${esc(h.address)}</option>`).join("");
   if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
 }
 
 async function planRoute() {
-  const selected = loadHomes().filter((h) => h.selected);
+  const selected = loadHomes().filter((h) => h.selected && h.address);
   const out = $("#route-result");
   const startMode = $("#route-start").value;
   const roundTrip = $("#route-round").checked;
@@ -454,8 +507,10 @@ export function readIncoming(search) {
     try { add = decodeURIComponent(raw); } catch { add = raw; }
     add = add.trim();
   }
-  return { url: params.get("url") || (/^https?:/i.test(add) ? add : ""), title: params.get("title") || "",
-           text: params.get("text") || (/^https?:/i.test(add) ? "" : add) };
+  add = deepDecode(add);
+  const url = deepDecode(params.get("url") || "");
+  return { url: url || (/^https?:/i.test(add) ? add : ""), title: params.get("title") || "",
+           text: deepDecode(params.get("text") || "") || (/^https?:/i.test(add) ? "" : add) };
 }
 
 /** Bookmarklet code. Desktop opens a new tab; iPhone/iPad Safari works best in the same tab. */
@@ -470,13 +525,7 @@ function handleIncoming() {
   const shared = readIncoming(location.search);
   let msg = null;
   if (shared.url || shared.title || shared.text) {
-    const parsed = parseShared(shared);
-    if (parsed) {
-      const r = addHome(parsed);
-      msg = [r.added ? `Added ${parsed.address}.` : `${parsed.address} is already in your list.`, false];
-    } else {
-      msg = ["Couldn't find an address in what was shared. Paste the listing's address instead.", true];
-    }
+    msg = saveShared(shared);
     for (const k of ["url", "title", "text"]) params.delete(k);
     const clean = new URL(location.href);
     clean.search = params.toString();
@@ -556,10 +605,7 @@ export function initHomes() {
     const input = $("#add-input");
     const value = input.value.trim();
     if (!value) return;
-    const parsed = parseShared(/^https?:/i.test(value) ? { url: value } : { text: value });
-    if (!parsed) { flash("Couldn't find an address in that. Paste a Zillow, Redfin or Realtor.com listing link, or type the full address.", true); return; }
-    const r = addHome(parsed);
-    flash(r.added ? `Added ${parsed.address}.` : `${parsed.address} is already in your list.`);
+    flash(...saveShared(/^https?:/i.test(value) ? { url: deepDecode(value) } : { text: value }));
     input.value = "";
     renderList();
   });
@@ -572,6 +618,18 @@ export function initHomes() {
   });
 
   $("#homes-list").addEventListener("click", async (e) => {
+    const editId = e.target.dataset?.edit;
+    if (editId) {
+      const home = loadHomes().find((h) => h.id === editId);
+      const value = prompt("Address (street, town, PA ZIP):", home?.address || "");
+      if (value == null || !value.trim()) return;
+      const address = value.trim().replace(/\s+/g, " ");
+      updateHomes((list) => list.map((h) => (h.id === editId
+        ? { ...h, address, selected: true, lat: undefined, lon: undefined } : h)));
+      flash(`Saved ${address}.`);
+      renderList();
+      return;
+    }
     const removeId = e.target.dataset?.remove;
     const act = e.target.dataset?.act;
     if (removeId) {
