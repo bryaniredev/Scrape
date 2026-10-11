@@ -83,3 +83,9 @@ ul.homes li { display: flex; flex-wrap: wrap; justify-content: space-between; ga
 .link-btn { background: none; color: var(--bad); padding: 0; font-size: 13px; text-decoration: underline; }
 a.button { display: inline-block; padding: 9px 16px; border-radius: 8px; background: var(--accent); color: #fff; text-decoration: none; margin: 4px 6px 4px 0; }
 ol.route { padding-left: 22px; } ol.route li { margin-bottom: 4px; }
+details.howto { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+details.howto summary { cursor: pointer; }
+details.howto ol { padding-left: 20px; } details.howto li { margin-bottom: 8px; }
+.copyrow { display: flex; gap: 8px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
+.copyrow code { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+.copyrow button { padding: 5px 10px; font-size: 13px; }

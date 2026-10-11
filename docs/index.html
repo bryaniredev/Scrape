@@ -54,6 +54,7 @@
         <label class="grow">Paste a Zillow, Redfin or Realtor.com link, or type an address
           <input id="add-input" autocomplete="off" placeholder="https://www.zillow.com/homedetails/… or 123 Main St, Bryn Mawr, PA 19010"></label>
         <button type="submit">Add</button>
+        <button type="button" id="paste-home" class="secondary">Paste &amp; add</button>
       </form>
       <div id="homes-msg" role="status" aria-live="polite"></div>
       <div id="homes-list"></div>
@@ -75,9 +76,32 @@
       <ul class="notes small">
         <li><strong>Android:</strong> open this site in Chrome, tap <em>⋮ → Add to Home screen</em> (or <em>Install app</em>). After that, <strong>PA Home Scout</strong> appears in the <em>Share</em> menu of the Zillow, Redfin and Realtor.com apps and of Chrome – share a listing to it and it's added here.</li>
         <li><strong>Computer:</strong> drag this button to your bookmarks bar: <a id="bookmarklet" class="button" href="#">+ PA Home Scout</a>. Then click the bookmark while viewing any listing.</li>
-        <li><strong>iPhone / iPad:</strong> Apple doesn't let websites appear in the Share menu. In the listing app tap <em>Share → Copy Link</em> (or <em>Copy</em>), then paste it into the box above.</li>
+        <li><strong>iPhone / iPad:</strong> use the options below in <strong>Safari</strong> (not a home-screen copy of this site – that keeps a separate list). Quickest without any setup: in the listing tap <em>Share → Copy</em>, come back here and tap <em>Paste &amp; add</em>.</li>
         <li>Your list is saved in this browser only. Use <em>Copy list link</em> to move it to another device.</li>
       </ul>
+      <details class="howto">
+        <summary><strong>iPhone: add “Add to PA Home Scout” to the Share menu</strong> (one-time, ~2 minutes)</summary>
+        <ol class="small">
+          <li>Open the <strong>Shortcuts</strong> app and tap <strong>+</strong> to make a new shortcut.</li>
+          <li>Tap <strong>Add Action</strong>, search for <strong>Open URLs</strong> and add it.</li>
+          <li>Tap the blue <em>URL</em> placeholder in that action and paste this:
+            <div class="copyrow"><code id="ios-shortcut-url"></code><button type="button" class="secondary" data-copy="ios-shortcut-url">Copy</button></div>
+            then, straight after it, tap <strong>Shortcut Input</strong> in the bar above the keyboard (choose <em>Select Variable</em> if you don't see it) so the URL ends with the <em>Shortcut Input</em> bubble.</li>
+          <li>Tap the <strong>ⓘ</strong> / settings button and turn on <strong>Show in Share Sheet</strong>. At the top, make it receive <strong>URLs</strong> and <strong>Safari web pages</strong>.</li>
+          <li>Name it <strong>Add to PA Home Scout</strong> and tap <strong>Done</strong>.</li>
+        </ol>
+        <p class="small">Now, in Safari or the Zillow / Redfin / Realtor.com apps, tap <em>Share</em> on a listing and choose <strong>Add to PA Home Scout</strong>. Safari opens this page with the home added. (If it isn't listed, scroll to the bottom of the Share menu → <em>Edit Actions</em> and add it.)</p>
+      </details>
+      <details class="howto">
+        <summary><strong>iPhone Safari: one-tap bookmark</strong> (alternative)</summary>
+        <ol class="small">
+          <li>In Safari, tap <em>Share → Add Bookmark</em> on any page (this one is fine) and save it as <strong>+ Home Scout</strong>.</li>
+          <li>Copy this code:
+            <div class="copyrow"><code id="ios-bookmarklet"></code><button type="button" class="secondary" data-copy="ios-bookmarklet">Copy</button></div></li>
+          <li>Open <em>Bookmarks</em>, tap <strong>Edit</strong>, tap the <strong>+ Home Scout</strong> bookmark, clear its address and paste the code. Tap <strong>Done</strong>.</li>
+        </ol>
+        <p class="small">On a listing page in Safari, open <em>Bookmarks</em> and tap <strong>+ Home Scout</strong> (or type “Home Scout” in the address bar and pick the bookmark). The listing is added and this page opens.</p>
+      </details>
     </section>
   </div>
 </main>

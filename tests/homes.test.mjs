@@ -96,3 +96,25 @@ test("Google Maps links split long trips into 10-stop parts", () => {
   assert.equal(new URL(many[1]).searchParams.get("origin"), "H9");
   assert.equal(new URL(many[1]).searchParams.get("destination"), "H12");
 });
+
+test("incoming shares: raw links from an iOS Shortcut, bookmarklets, share targets", () => {
+  // Shortcut with an un-encoded URL that has its own query string
+  const raw = h.readIncoming("?add=https://www.zillow.com/homedetails/123-Main-St-Bryn-Mawr-PA-19010/1_zpid/?utm_source=share&utm_medium=x");
+  assert.equal(raw.url, "https://www.zillow.com/homedetails/123-Main-St-Bryn-Mawr-PA-19010/1_zpid/?utm_source=share&utm_medium=x");
+  assert.equal(h.parseShared(raw).address, "123 Main St, Bryn Mawr, PA 19010");
+  // Encoded form (bookmarklet): title first, add last
+  const base = "https://bryaniredev.github.io/Scrape/";
+  const code = h.bookmarkletCode(base, { sameTab: true });
+  assert.ok(code.startsWith("javascript:location.href="));
+  assert.ok(code.indexOf("?title=") < code.indexOf("&add="));
+  const fromBm = h.readIncoming(`?title=${encodeURIComponent("9 Oak Ave, Ardmore, PA 19003 | Redfin")}&add=${encodeURIComponent("https://www.redfin.com/PA/Ardmore/9-Oak-Ave-19003/home/5")}`);
+  assert.equal(fromBm.title, "9 Oak Ave, Ardmore, PA 19003 | Redfin");
+  assert.equal(h.parseShared(fromBm).url, "https://www.redfin.com/PA/Ardmore/9-Oak-Ave-19003/home/5");
+  assert.ok(h.bookmarkletCode(base).includes("window.open("));
+  // Shortcut that passed plain text (e.g. an address) rather than a URL
+  assert.equal(h.readIncoming("?add=12%20Lancaster%20Ave%2C%20Wayne%2C%20PA%2019087").text, "12 Lancaster Ave, Wayne, PA 19087");
+  // Android share target
+  const android = h.readIncoming(`?title=Zillow&text=${encodeURIComponent("Look 123 Main St, Bryn Mawr, PA 19010 https://zillow.com/homedetails/x/1_zpid/")}`);
+  assert.equal(h.parseShared(android).address, "123 Main St, Bryn Mawr, PA 19010");
+  assert.deepEqual(h.readIncoming("?zip=19010"), { url: "", title: "", text: "" });
+});

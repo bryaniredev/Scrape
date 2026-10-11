@@ -441,9 +441,33 @@ async function planRoute() {
   }
 }
 
+/**
+ * Read what was shared to the site. `add` is always the last parameter and may carry a raw,
+ * un-encoded listing URL (an iOS Shortcut can't always encode it), so take everything after it.
+ */
+export function readIncoming(search) {
+  const params = new URLSearchParams(search);
+  let add = "";
+  const m = search.match(/[?&]add=(.*)$/s);
+  if (m) {
+    const raw = m[1].replace(/\+/g, " ");
+    try { add = decodeURIComponent(raw); } catch { add = raw; }
+    add = add.trim();
+  }
+  return { url: params.get("url") || (/^https?:/i.test(add) ? add : ""), title: params.get("title") || "",
+           text: params.get("text") || (/^https?:/i.test(add) ? "" : add) };
+}
+
+/** Bookmarklet code. Desktop opens a new tab; iPhone/iPad Safari works best in the same tab. */
+export function bookmarkletCode(base, { sameTab = false } = {}) {
+  const target = `${JSON.stringify(`${base}?title=`)}+encodeURIComponent(document.title)+'&add='+encodeURIComponent(location.href)`;
+  return sameTab ? `javascript:location.href=${target}` : `javascript:(()=>{window.open(${target},'_blank')})()`;
+}
+
 function handleIncoming() {
-  const params = new URLSearchParams(location.search);
-  const shared = { url: params.get("url") || params.get("add") || "", title: params.get("title") || "", text: params.get("text") || "" };
+  // Everything from `add=` on belongs to the shared link, including its own `&...` parts.
+  const params = new URLSearchParams(location.search.replace(/[?&]add=.*$/s, ""));
+  const shared = readIncoming(location.search);
   let msg = null;
   if (shared.url || shared.title || shared.text) {
     const parsed = parseShared(shared);
@@ -453,7 +477,7 @@ function handleIncoming() {
     } else {
       msg = ["Couldn't find an address in what was shared. Paste the listing's address instead.", true];
     }
-    for (const k of ["url", "add", "title", "text"]) params.delete(k);
+    for (const k of ["url", "title", "text"]) params.delete(k);
     const clean = new URL(location.href);
     clean.search = params.toString();
     clean.hash = "homes";
@@ -484,12 +508,40 @@ export function showTab(name) {
 export function initHomes() {
   const msg = handleIncoming();
 
-  // Bookmarklet for desktop browsers: sends the current listing page to this site.
+  // Bookmarklets: desktop (drag to bookmarks bar) and iPhone Safari (paste into a bookmark).
   const base = `${location.origin}${location.pathname}`;
   const bm = $("#bookmarklet");
   if (bm) {
-    bm.setAttribute("href", `javascript:(()=>{window.open(${JSON.stringify(base)}+'?add='+encodeURIComponent(location.href)+'&title='+encodeURIComponent(document.title),'_blank')})()`);
+    bm.setAttribute("href", bookmarkletCode(base));
     bm.addEventListener("click", (e) => { e.preventDefault(); flash("Drag this button to your bookmarks bar, then click it while viewing a listing.", false); });
+  }
+  const copyables = { "ios-shortcut-url": `${base}?add=`, "ios-bookmarklet": bookmarkletCode(base, { sameTab: true }) };
+  for (const [id, value] of Object.entries(copyables)) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  }
+  document.addEventListener("click", async (e) => {
+    const id = e.target.dataset?.copy;
+    if (!id || !copyables[id]) return;
+    try {
+      await navigator.clipboard.writeText(copyables[id]);
+      e.target.textContent = "Copied ✓";
+      setTimeout(() => { e.target.textContent = "Copy"; }, 2000);
+    } catch {
+      prompt("Copy this:", copyables[id]);
+    }
+  });
+  const pasteBtn = $("#paste-home");
+  if (pasteBtn) {
+    if (!navigator.clipboard?.readText) pasteBtn.hidden = true;
+    pasteBtn.addEventListener("click", async () => {
+      try {
+        $("#add-input").value = (await navigator.clipboard.readText()).trim();
+        $("#add-home").requestSubmit();
+      } catch {
+        flash("Couldn't read the clipboard. Long-press the box and choose Paste instead.", true);
+      }
+    });
   }
 
   for (const b of document.querySelectorAll(".tabs [data-tab]")) {
