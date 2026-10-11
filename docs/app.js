@@ -595,6 +595,19 @@ function renderCrime(cr) {
     <p class="muted small">Agency figures cover the whole jurisdiction, not just this ZIP. Red = above the PA rate.</p>`;
 }
 
+export const SAFETY_LINKS = {
+  "Ring Neighbors": "https://neighbors.ring.com/",
+  "Community Crime Map": "https://communitycrimemap.com/",
+  SpotCrime: "https://spotcrime.com/",
+  Citizen: "https://citizen.com/",
+};
+
+function renderSafetyLinks() {
+  return `<h3>Neighborhood safety reports</h3>
+    <p class="muted small">Recent incidents and posts from residents and police. These sites don't take a ZIP in the link, so enter the ZIP or address once the site opens.</p>
+    ${linkList(SAFETY_LINKS)}`;
+}
+
 function renderHomes(loc, nearby, filters, maxMinutes) {
   const desc = [filters.minBeds && `${filters.minBeds}+ beds`, filters.maxPrice && `up to ${money(filters.maxPrice)}`].filter(Boolean).join(", ");
   let html = `<p>Search active listings in <strong>${esc(loc.zip)}</strong>${desc ? ` (${esc(desc)})` : ""}: ${linkList(homeSearchLinks(loc.zip, filters))}</p>`;
@@ -802,7 +815,7 @@ async function run() {
     flood: settle(fetchFlood(loc)),
   };
   const guard = (fn) => (v) => { if (id === runId) fn(v); };
-  p.crime.then(guard((r) => fill("crime-card", r.ok ? renderCrime(r.value) : unavailable(r.error))));
+  p.crime.then(guard((r) => fill("crime-card", (r.ok ? renderCrime(r.value) : unavailable(r.error)) + renderSafetyLinks())));
   p.nearby.then(guard((r) => fill("homes-card", renderHomes(loc, r, filters, drive))));
   p.emergency.then(guard((r) => fill("emergency-card", renderEmergency(loc, r))));
   p.schools.then(guard((r) => fill("schools-card", r.ok ? renderSchools(r.value) : unavailable(r.error))));

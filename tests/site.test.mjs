@@ -146,3 +146,7 @@ test("flood and escaping", async () => {
   assert.equal(f.zone, "AE");
   assert.equal(app.esc('<img src=x onerror="a">'), "&lt;img src=x onerror=&quot;a&quot;&gt;");
 });
+
+test("safety links include Ring Neighbors", () => {
+  assert.equal(app.SAFETY_LINKS["Ring Neighbors"], "https://neighbors.ring.com/");
+});
