@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PA Home Scout{% if report %} - {{ report.location.zip }}{% endif %}</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #5d6677; --line: #e3e6ec;
+    --accent: #2457c5; --good: #1d7a46; --bad: #b3261e; --warn: #9a6400;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #12151b; --card: #1b2029; --text: #e6e9ef; --muted: #9aa3b2; --line: #2c3340;
+            --accent: #7aa2ff; --good: #5cc98b; --bad: #ff8a80; --warn: #e3b448; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 24px 16px 8px; max-width: 1100px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 26px; }
+  h2 { margin: 0 0 12px; font-size: 18px; }
+  h3 { margin: 14px 0 6px; font-size: 15px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 0 16px 48px; }
+  form { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 16px 0; }
+  label { display: flex; flex-direction: column; font-size: 13px; color: var(--muted); }
+  input { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); width: 110px; }
+  input[name=zip] { width: 140px; font-size: 18px; letter-spacing: 1px; }
+  button { font: inherit; padding: 9px 18px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; min-width: 0; }
+  .wide { grid-column: 1 / -1; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .stat .v { font-size: 22px; font-weight: 600; }
+  .stat .k { font-size: 12px; color: var(--muted); }
+  .up { color: var(--good); } .down { color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; }
+  td.r, th.r { text-align: right; }
+  .scroll { max-height: 460px; overflow: auto; }
+  .tablewrap { overflow-x: auto; }
+  .badge { display: inline-block; min-width: 34px; text-align: center; padding: 2px 6px; border-radius: 6px; font-weight: 600; color: #fff; }
+  .b-hi { background: #1d7a46; } .b-mid { background: #9a6400; } .b-lo { background: #b3261e; } .b-na { background: #6b7280; }
+  .error { border-color: var(--bad); }
+  .unavail { color: var(--warn); }
+  #map { height: 420px; border-radius: 10px; }
+  .legend span { display: inline-block; margin-right: 14px; font-size: 13px; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
+  ul.notes { padding-left: 18px; margin: 0; } ul.notes li { margin-bottom: 8px; }
+  a { color: var(--accent); }
+  .links a { display: inline-block; margin: 0 12px 6px 0; }
+  svg.spark { width: 100%; height: auto; }
+  svg.spark polyline { fill: none; stroke: var(--accent); stroke-width: 2; }
+</style>
+</head>
+<body>
+<header>
+  <h1>PA Home Scout</h1>
+  <div class="muted">Enter a Pennsylvania ZIP code to research home prices, listings, schools, safety and amenities.</div>
+  <form method="get" action="/">
+    <label>ZIP code<input name="zip" value="{{ zip }}" placeholder="e.g. 19103" pattern="\d{5}" required autofocus></label>
+    <label>Max drive (min)<input name="drive" type="number" min="5" max="60" value="{{ drive }}"></label>
+    <label>Mortgage rate %<input name="rate" type="number" step="0.05" value="{{ rate }}"></label>
+    <label>Down payment %<input name="down" type="number" step="1" min="0" max="100" value="{{ down }}"></label>
+    <button type="submit">Scout</button>
+  </form>
+</header>
+<main>
+{% if error %}
+  <div class="card error"><strong>Couldn't build a report:</strong> {{ error }}</div>
+{% endif %}
+
+{% if report %}
+{% set s = report.sections %}
+{% set loc = report.location %}
+<div class="grid">
+
+  <div class="card wide">
+    <h2>{{ loc.place }}, PA {{ loc.zip }}</h2>
+    <div class="muted small">{{ loc.county or "County unknown" }} &middot; generated {{ report.generated }}</div>
+  </div>
+
+  {# ---------- Home values ---------- #}
+  <div class="card wide">
+    <h2>What homes are going for</h2>
+    <div class="stats">
+      {% if s.home_values.ok %}{% set z = s.home_values.data %}
+        <div class="stat"><div class="v">{{ z.typical_home_value|money }}</div><div class="k">Zillow typical value ({{ z.as_of[:7] }})</div></div>
+        <div class="stat"><div class="v {{ 'up' if (z.change_1y_pct or 0) >= 0 else 'down' }}">{{ z.change_1y_pct|num('%') }}</div><div class="k">1-year change</div></div>
+        <div class="stat"><div class="v {{ 'up' if (z.change_5y_pct or 0) >= 0 else 'down' }}">{{ z.change_5y_pct|num('%') }}</div><div class="k">5-year change</div></div>
+      {% endif %}
+      {% if s.listings.ok %}{% set ls = s.listings.data.in_zip_stats %}
+        <div class="stat"><div class="v">{{ ls.median_price|money }}</div><div class="k">Median asking price in ZIP ({{ ls.count }} active)</div></div>
+        <div class="stat"><div class="v">{{ ls.median_price_per_sqft|money }}</div><div class="k">Median asking $/sqft</div></div>
+        <div class="stat"><div class="v">{{ ls.median_days_on_market|num }}</div><div class="k">Median days on market</div></div>
+      {% endif %}
+      {% if s.demographics.ok %}{% set d = s.demographics.data %}
+        <div class="stat"><div class="v">{{ d.zip.median_home_value|money }}</div><div class="k">Census median value (PA {{ d.pennsylvania.median_home_value|money }})</div></div>
+        <div class="stat"><div class="v">{{ d.zip.median_gross_rent|money }}</div><div class="k">Median rent</div></div>
+        <div class="stat"><div class="v">{{ d.zip.median_real_estate_taxes|money }}</div><div class="k">Median property tax / yr (~{{ d.zip.effective_tax_rate_pct|num('%') }})</div></div>
+        <div class="stat"><div class="v">{{ d.zip.price_to_income|num('x') }}</div><div class="k">Value-to-income ratio</div></div>
+      {% endif %}
+    </div>
+    {% if spark %}
+      <h3>Zillow home value index, {{ spark.start[:7] }} to {{ spark.end[:7] }}</h3>
+      <svg class="spark" viewBox="0 0 {{ spark.width }} {{ spark.height }}" preserveAspectRatio="none" role="img"
+           aria-label="Home value trend from {{ spark.lo|money }} to {{ spark.hi|money }}"><polyline points="{{ spark.points }}"/></svg>
+      <div class="muted small">Range {{ spark.lo|money }} &ndash; {{ spark.hi|money }}</div>
+    {% endif %}
+    {% if not s.home_values.ok %}<p class="unavail small">Zillow index: {{ s.home_values.error }}</p>{% endif %}
+    {% if not s.demographics.ok %}<p class="unavail small">Census: {{ s.demographics.error }}</p>{% endif %}
+  </div>
+
+  {# ---------- Monthly cost ---------- #}
+  {% if report.costs %}{% set c = report.costs %}
+  <div class="card">
+    <h2>Estimated monthly cost</h2>
+    <div class="muted small">For a {{ c.price|money }} home ({{ c.basis }}), {{ c.down_pct|num }}% down, {{ c.rate_pct }}% for {{ c.years }} years.</div>
+    <table>
+      <tr><td>Principal &amp; interest</td><td class="r">{{ c.principal_interest|money }}</td></tr>
+      <tr><td>Property tax (est.)</td><td class="r">{{ c.taxes|money }}</td></tr>
+      <tr><td>Homeowners insurance (est.)</td><td class="r">{{ c.insurance|money }}</td></tr>
+      {% if c.pmi %}<tr><td>PMI (est.)</td><td class="r">{{ c.pmi|money }}</td></tr>{% endif %}
+      <tr><th>Total</th><th class="r">{{ c.total_monthly|money }}</th></tr>
+    </table>
+    <p class="small">Down payment {{ c.down_payment|money }}. Income needed at the 28% guideline: <strong>{{ c.income_needed|money }}</strong>{% if c.median_income %}; local median household income is {{ c.median_income|money }} ({{ c.share_of_median_income_pct|num('%') }} of it){% endif %}.</p>
+  </div>
+  {% endif %}
+
+  {# ---------- Crime ---------- #}
+  <div class="card">
+    <h2>Crime</h2>
+    {% if s.crime.ok %}{% set cr = s.crime.data %}
+      <div class="muted small">Offenses per 100,000 residents, {{ cr.year }} (FBI). Lower is safer.</div>
+      <table>
+        <tr><th>Agency</th><th class="r">Violent</th><th class="r">Property</th></tr>
+        {% for a in cr.agencies %}
+        <tr><td>{{ a.name }} <span class="muted small">{{ a.miles }} mi{% if a.months_reported and a.months_reported < 12 %}, {{ a.months_reported }} mo reported{% endif %}</span></td>
+            <td class="r {{ 'down' if a.violent and cr.pennsylvania.violent and a.violent > cr.pennsylvania.violent else '' }}">{{ a.violent|num }}</td>
+            <td class="r {{ 'down' if a.property and cr.pennsylvania.property and a.property > cr.pennsylvania.property else '' }}">{{ a.property|num }}</td></tr>
+        {% endfor %}
+        <tr><td><em>Pennsylvania</em></td><td class="r">{{ cr.pennsylvania.violent|num }}</td><td class="r">{{ cr.pennsylvania.property|num }}</td></tr>
+        <tr><td><em>United States</em></td><td class="r">{{ cr.united_states.violent|num }}</td><td class="r">{{ cr.united_states.property|num }}</td></tr>
+      </table>
+      <p class="muted small">Agency figures cover the whole jurisdiction, not just this ZIP. Red = above the PA rate.</p>
+    {% else %}
+      <p class="unavail">{{ s.crime.error }}</p>
+    {% endif %}
+    <div class="links small"><a href="https://cde.ucr.cjis.gov/" target="_blank" rel="noopener">FBI Crime Data Explorer</a><a href="https://www.ucr.pa.gov/" target="_blank" rel="noopener">PA UCR</a></div>
+  </div>
+
+  {# ---------- Map ---------- #}
+  <div class="card wide">
+    <h2>Map</h2>
+    <div class="legend"><span><i class="dot" style="background:#2457c5"></i>For sale</span><span><i class="dot" style="background:#1d7a46"></i>Schools</span><span><i class="dot" style="background:#c2410c"></i>Restaurants</span><span><i class="dot" style="background:#7c3aed"></i>Amenities</span><span><i class="dot" style="background:#111"></i>ZIP center</span></div>
+    <div id="map"></div>
+  </div>
+
+  {# ---------- Listings ---------- #}
+  <div class="card wide">
+    <h2>Homes for sale within {{ report.max_drive_minutes }} minutes' drive</h2>
+    {% if s.listings.ok %}{% set l = s.listings.data %}{% set st = l.stats %}
+      <div class="stats">
+        <div class="stat"><div class="v">{{ st.count }}</div><div class="k">Active listings</div></div>
+        <div class="stat"><div class="v">{{ st.median_price|money }}</div><div class="k">Median price</div></div>
+        <div class="stat"><div class="v">{{ st.min_price|money }} &ndash; {{ st.max_price|money }}</div><div class="k">Price range</div></div>
+        <div class="stat"><div class="v">{{ st.median_price_per_sqft|money }}</div><div class="k">Median $/sqft</div></div>
+      </div>
+      {% if l.drive_time_method != 'osrm' %}<p class="unavail small">Routing service unavailable, so drive times are estimated from distance.</p>{% endif %}
+      <div class="scroll tablewrap"><table>
+        <tr><th>Address</th><th class="r">Price</th><th class="r">Beds</th><th class="r">Baths</th><th class="r">Sqft</th><th class="r">Built</th><th>Type</th><th class="r">Drive</th><th class="r">DOM</th></tr>
+        {% for h in l.homes %}
+        <tr><td>{{ h.address }}</td><td class="r">{{ h.price|money }}</td><td class="r">{{ h.beds|num }}</td><td class="r">{{ h.baths|num }}</td><td class="r">{{ h.sqft|num }}</td><td class="r">{{ h.year_built or '' }}</td><td>{{ h.type or '' }}</td><td class="r">{{ h.drive_minutes|num }} min</td><td class="r">{{ h.days_on_market|num }}</td></tr>
+        {% endfor %}
+      </table></div>
+    {% else %}
+      <p class="unavail">{{ s.listings.error }}</p>
+    {% endif %}
+    <div class="links">{% for name in ['Zillow', 'Redfin', 'Realtor.com'] %}<a href="{{ report.links[name] }}" target="_blank" rel="noopener">Search {{ name }}</a>{% endfor %}</div>
+  </div>
+
+  {# ---------- Schools ---------- #}
+  <div class="card wide">
+    <h2>Schools nearby</h2>
+    {% if s.schools.ok %}{% set sc = s.schools.data %}
+      <div class="muted small">{{ sc.rating_label }}. Source: {{ sc.source }}. Attendance zones vary &mdash; confirm the assigned school for a specific address with the district.</div>
+      <div class="tablewrap"><table>
+        <tr><th class="r">Rating</th><th>School</th><th>Level</th><th>District</th><th class="r">Students</th><th class="r">Students / teacher</th><th class="r">Distance</th></tr>
+        {% for x in sc.schools %}
+        {% set r = x.rating %}
+        <tr><td class="r"><span class="badge {{ 'b-na' if r is none else ('b-hi' if r >= 7 else ('b-mid' if r >= 4 else 'b-lo')) }}">{{ r if r is not none else 'n/a' }}</span></td>
+          <td>{% if x.url %}<a href="{{ x.url }}" target="_blank" rel="noopener">{{ x.name }}</a>{% else %}{{ x.name }}{% endif %}{% if x.charter %} <span class="muted small">(charter)</span>{% endif %}
+            {% if x.proficiency %}<div class="muted small">Reading {{ x.proficiency.reading_pct_proficient|num('%') }} &middot; Math {{ x.proficiency.math_pct_proficient|num('%') }} proficient ({{ x.proficiency.year }})</div>{% endif %}</td>
+          <td>{{ x.level }}{% if x.grades %} <span class="muted small">{{ x.grades }}</span>{% endif %}</td>
+          <td>{{ x.district or '' }}</td><td class="r">{{ x.enrollment|num }}</td><td class="r">{{ x.student_teacher_ratio|num }}</td><td class="r">{{ x.miles }} mi</td></tr>
+        {% endfor %}
+      </table></div>
+      <div class="links small">{% for name, url in sc.links.items() %}<a href="{{ url }}" target="_blank" rel="noopener">{{ name }}</a>{% endfor %}</div>
+    {% else %}
+      <p class="unavail">{{ s.schools.error }}</p>
+    {% endif %}
+  </div>
+
+  {# ---------- Restaurants ---------- #}
+  <div class="card">
+    <h2>Best-rated restaurants</h2>
+    {% if s.restaurants.ok %}
+      <table>
+        {% for x in s.restaurants.data.restaurants %}
+        <tr><td><a href="{{ x.url }}" target="_blank" rel="noopener">{{ x.name }}</a> <span class="muted small">{{ x.price }}</span><div class="muted small">{{ x.categories }}</div></td>
+            <td class="r"><strong>{{ x.rating }}&#9733;</strong><div class="muted small">{{ x.reviews }} reviews &middot; {{ x.miles }} mi</div></td></tr>
+        {% endfor %}
+      </table>
+    {% else %}
+      <p class="unavail small">{{ s.restaurants.error }}</p>
+      {% if s.amenities.ok %}
+        <h3>Restaurants nearby (OpenStreetMap, unrated)</h3>
+        <ul class="notes">{% for x in s.amenities.data.categories['Restaurants'].nearest %}<li>{{ x.name }} {% if x.cuisine %}<span class="muted small">{{ x.cuisine }}</span>{% endif %} &middot; {{ x.miles }} mi</li>{% endfor %}</ul>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  {# ---------- Amenities ---------- #}
+  <div class="card">
+    <h2>Amenities</h2>
+    {% if s.amenities.ok %}{% set a = s.amenities.data %}
+      <div class="muted small">Counts within {{ a.radius_miles }} miles (OpenStreetMap).</div>
+      <table>
+        <tr><th>Type</th><th class="r">Count</th><th>Nearest</th></tr>
+        {% for name, info in a.categories.items() %}
+        <tr><td>{{ name }}</td><td class="r">{{ info.count }}</td>
+            <td>{% if info.nearest %}{{ info.nearest[0].name }} <span class="muted small">{{ info.nearest[0].miles }} mi</span>{% elif info.nearest_miles is not none %}<span class="muted small">{{ info.nearest_miles }} mi</span>{% else %}<span class="muted small">none nearby</span>{% endif %}</td></tr>
+        {% endfor %}
+      </table>
+    {% else %}
+      <p class="unavail">{{ s.amenities.error }}</p>
+    {% endif %}
+  </div>
+
+  {# ---------- Neighborhood ---------- #}
+  <div class="card">
+    <h2>Neighborhood profile</h2>
+    {% if s.demographics.ok %}{% set z = s.demographics.data.zip %}{% set pa = s.demographics.data.pennsylvania %}
+      <div class="muted small">Census ACS 5-year {{ s.demographics.data.year }}.</div>
+      <table>
+        <tr><th></th><th class="r">This ZIP</th><th class="r">PA</th></tr>
+        <tr><td>Population</td><td class="r">{{ z.population|num }}</td><td class="r"></td></tr>
+        <tr><td>Median household income</td><td class="r">{{ z.median_household_income|money }}</td><td class="r">{{ pa.median_household_income|money }}</td></tr>
+        <tr><td>Median age</td><td class="r">{{ z.median_age|num }}</td><td class="r">{{ pa.median_age|num }}</td></tr>
+        <tr><td>Owner-occupied homes</td><td class="r">{{ z.owner_occupied_pct|num('%') }}</td><td class="r">{{ pa.owner_occupied_pct|num('%') }}</td></tr>
+        <tr><td>Vacant housing</td><td class="r">{{ z.vacancy_pct|num('%') }}</td><td class="r">{{ pa.vacancy_pct|num('%') }}</td></tr>
+        <tr><td>Below poverty line</td><td class="r">{{ z.poverty_pct|num('%') }}</td><td class="r">{{ pa.poverty_pct|num('%') }}</td></tr>
+        <tr><td>Bachelor's degree or higher</td><td class="r">{{ z.bachelors_or_higher_pct|num('%') }}</td><td class="r">{{ pa.bachelors_or_higher_pct|num('%') }}</td></tr>
+        <tr><td>Median year homes built</td><td class="r">{{ z.median_year_built|int if z.median_year_built else 'n/a' }}</td><td class="r">{{ pa.median_year_built|int if pa.median_year_built else 'n/a' }}</td></tr>
+        <tr><td>Mean commute</td><td class="r">{{ z.mean_commute_minutes|num(' min') }}</td><td class="r">{{ pa.mean_commute_minutes|num(' min') }}</td></tr>
+      </table>
+    {% else %}
+      <p class="unavail">{{ s.demographics.error }}</p>
+    {% endif %}
+  </div>
+
+  {# ---------- Risks / PA notes ---------- #}
+  <div class="card">
+    <h2>Flood risk &amp; PA buyer checklist</h2>
+    {% if s.flood.ok %}{% set f = s.flood.data %}
+      <p><strong>FEMA flood zone at ZIP center: {{ f.zone or 'not mapped' }}</strong>{% if f.subtype %} <span class="muted small">{{ f.subtype }}</span>{% endif %}<br><span class="small">{{ f.meaning }}</span></p>
+    {% else %}
+      <p class="unavail small">Flood zone: {{ s.flood.error }}</p>
+    {% endif %}
+    <ul class="notes small">
+      {% for n in report.pa_notes %}<li><strong>{{ n.title }}.</strong> {{ n.text }}{% if n.link %} <a href="{{ n.link }}" target="_blank" rel="noopener">Look up</a>{% endif %}</li>{% endfor %}
+    </ul>
+  </div>
+
+  <div class="card wide links">
+    <h2>More research</h2>
+    {% for name, url in report.links.items() %}<a href="{{ url }}" target="_blank" rel="noopener">{{ name }}</a>{% endfor %}
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  (function () {
+    var data = {{ map_json|safe }};
+    var map = L.map('map').setView(data.center, 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+    var colors = {home: '#2457c5', school: '#1d7a46', food: '#c2410c', amenity: '#7c3aed'};
+    var bounds = [data.center];
+    function text(t) { var el = document.createElement('div'); el.textContent = t; return el; }
+    L.circleMarker(data.center, {radius: 8, color: '#111', fillOpacity: 0.9}).addTo(map).bindPopup('ZIP center');
+    data.points.forEach(function (p) {
+      if (p.lat == null || p.lon == null) return;
+      L.circleMarker([p.lat, p.lon], {radius: 6, color: colors[p.kind], weight: 1, fillOpacity: 0.75})
+        .addTo(map).bindPopup(text(p.label));
+      bounds.push([p.lat, p.lon]);
+    });
+    if (bounds.length > 1) map.fitBounds(bounds, {padding: [20, 20], maxZoom: 14});
+  })();
+</script>
+{% endif %}
+</main>
+</body>
+</html>
