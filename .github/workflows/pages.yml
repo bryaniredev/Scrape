@@ -27,14 +27,22 @@ jobs:
       - run: pip install -r requirements.txt pytest
       - run: python -m pytest -q
       - run: node --test tests/site.test.mjs
+      - id: pages
+        uses: actions/configure-pages@v5
       - name: Build site data (Zillow, Census, ZIP locations, emergency services)
         # Each file is built independently; anything that fails shows a notice on the site.
         continue-on-error: true
         env:
           # Optional repo secret; without it the build falls back to Census Reporter.
           CENSUS_API_KEY: ${{ secrets.CENSUS_API_KEY }}
+          # Fallback: reuse a file from the live site if its source is down right now.
+          PREVIOUS_SITE_URL: ${{ steps.pages.outputs.base_url }}
         run: python scripts/build_site_data.py docs/data
-      - uses: actions/configure-pages@v5
+      - name: Cache-bust scripts so browsers load this deploy's version
+        run: |
+          v="${GITHUB_SHA::8}"
+          sed -i "s#src=\"app.js\"#src=\"app.js?v=$v\"#; s#href=\"style.css\"#href=\"style.css?v=$v\"#" docs/index.html
+          grep -q "app.js?v=$v" docs/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs

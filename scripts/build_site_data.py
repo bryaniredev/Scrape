@@ -14,7 +14,9 @@ Each file is built independently; a failure in one doesn't stop the others.
 import csv
 import io
 import json
+import os
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -45,7 +47,12 @@ GAZETTEER_URLS = [
     f"https://www2.census.gov/geo/docs/maps-data/data/gazetteer/{y}_Gazetteer/{y}_Gaz_zcta_national.zip"
     for y in (2024, 2023, 2022, 2020)
 ]
-OVERPASS_URLS = ("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
+OVERPASS_URLS = (
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+)
+OVERPASS_ROUNDS = 2  # public Overpass servers often time out under load; try them all twice
 EMERGENCY_QUERY = """[out:json][timeout:300];
 area["ISO3166-2"="US-PA"][admin_level=4]->.pa;
 (
@@ -256,7 +263,7 @@ def parse_emergency(data: dict) -> dict:
 
 def build_emergency() -> dict:
     errors = []
-    for url in OVERPASS_URLS:
+    for url in [u for _ in range(OVERPASS_ROUNDS) for u in OVERPASS_URLS]:
         try:
             resp = requests.post(url, data={"data": EMERGENCY_QUERY}, headers=HEADERS, timeout=360)
             resp.raise_for_status()
@@ -266,7 +273,19 @@ def build_emergency() -> dict:
             errors.append(f"{url}: no results")
         except (requests.RequestException, ValueError) as exc:
             errors.append(f"{url}: {exc}")
+            time.sleep(10)
     raise RuntimeError("Overpass unavailable: " + "; ".join(errors))
+
+
+def previous_copy(name: str) -> dict:
+    """The copy of ``name`` from the currently deployed site, so a source that's down
+    during a deploy doesn't wipe that section off the live site."""
+    base = os.environ.get("PREVIOUS_SITE_URL", "").rstrip("/")
+    if not base:
+        raise RuntimeError("PREVIOUS_SITE_URL not set")
+    resp = requests.get(f"{base}/data/{name}", headers=HEADERS, timeout=120)
+    resp.raise_for_status()
+    return resp.json()
 
 
 def write(out_dir: Path, name: str, data: dict) -> None:
@@ -278,25 +297,31 @@ def write(out_dir: Path, name: str, data: dict) -> None:
 def main(out: str = "docs/data") -> int:
     out_dir = Path(out)
     out_dir.mkdir(parents=True, exist_ok=True)
+    rows = {}
+
+    def zhvi():
+        rows["zhvi"] = zillow._load_pa_rows()
+        return build_zhvi.build(rows["zhvi"])
+
     failures = 0
-    zhvi_rows = None
-    try:
-        zhvi_rows = zillow._load_pa_rows()
-        write(out_dir, "zhvi_pa.json", build_zhvi.build(zhvi_rows))
-    except Exception as exc:  # noqa: BLE001 - keep building the other files
-        failures += 1
-        print(f"zhvi failed: {exc}")
     for name, builder in (
+        ("zhvi_pa.json", zhvi),
         ("acs_pa.json", build_acs),
-        ("zcta_pa.json", lambda: build_zcta(zhvi_rows)),
+        ("zcta_pa.json", lambda: build_zcta(rows.get("zhvi"))),
         ("emergency_pa.json", build_emergency),
     ):
         try:
             write(out_dir, name, builder())
+            continue
+        except Exception as exc:  # noqa: BLE001 - keep building the other files
+            print(f"{name} failed: {exc}")
+        try:
+            write(out_dir, name, previous_copy(name))
+            print(f"{name}: kept the previously deployed copy")
         except Exception as exc:  # noqa: BLE001
             failures += 1
-            print(f"{name} failed: {exc}")
-    print(f"done, {failures} failure(s)")
+            print(f"{name}: no previous copy either ({exc})")
+    print(f"done, {failures} file(s) missing")
     return 0  # partial data is fine; the site shows a notice for anything missing
 
 

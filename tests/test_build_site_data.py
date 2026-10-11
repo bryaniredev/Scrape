@@ -92,3 +92,18 @@ def test_census_reporter_fallback(monkeypatch):
     row = data["zips"]["19010"]
     assert row["medianHomeValue"] == 100 and row["commuteMinutes"] is None
     assert "_travelTime" not in row and data["pa"]["population"] == 100
+
+
+def test_main_keeps_previous_copy_when_a_source_is_down(monkeypatch, tmp_path):
+    def down():
+        raise RuntimeError("Overpass unavailable")
+
+    monkeypatch.setattr(bsd.zillow, "_load_pa_rows", lambda: {"19010": {"series": [("2026-08-31", 1)], "city": "Bryn Mawr"}})
+    monkeypatch.setattr(bsd, "build_acs", lambda: {"zips": {}})
+    monkeypatch.setattr(bsd, "build_zcta", lambda rows: {"19010": [40, -75, rows["19010"]["city"]]})
+    monkeypatch.setattr(bsd, "build_emergency", down)
+    monkeypatch.setattr(bsd, "previous_copy", lambda name: {"hospital": [[1, 2, "Kept", ""]]})
+    assert bsd.main(str(tmp_path)) == 0
+    import json
+    assert json.loads((tmp_path / "emergency_pa.json").read_text())["hospital"][0][2] == "Kept"
+    assert json.loads((tmp_path / "zcta_pa.json").read_text())["19010"][2] == "Bryn Mawr"
