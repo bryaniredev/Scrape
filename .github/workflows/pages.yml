@@ -26,7 +26,7 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt pytest
       - run: python -m pytest -q
-      - run: node --test tests/
+      - run: node --test tests/site.test.mjs
       - name: Build Zillow home value data
         # If Zillow is unreachable the site still deploys; that section shows a notice.
         continue-on-error: true

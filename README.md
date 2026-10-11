@@ -78,7 +78,7 @@ There is also a JSON API: `GET /api/report?zip=19010&drive=20&rate=6.5&down=20`.
 ```bash
 pip install pytest
 python -m pytest            # Python app + data builder
-node --test tests/          # browser app (docs/app.js)
+node --test tests/site.test.mjs   # browser app (docs/app.js)
 ```
 
 The tests run offline against recorded API-shaped fixtures.
