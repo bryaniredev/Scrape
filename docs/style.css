@@ -20,6 +20,7 @@ p { margin: 0 0 8px; }
 form { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 16px 0; }
 label { display: flex; flex-direction: column; font-size: 13px; color: var(--muted); gap: 2px; }
 input { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); width: 110px; }
+input.wide-input { width: 130px; }
 #zip { width: 140px; font-size: 18px; letter-spacing: 1px; }
 .keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 10px 0; }
 .keys input { width: 100%; }
@@ -54,3 +55,6 @@ a { color: var(--accent); }
 .links a { display: inline-block; margin: 0 12px 6px 0; }
 svg.spark { width: 100%; height: 120px; display: block; }
 svg.spark polyline { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.links a + a { margin-left: 0; }
+td .links a { margin: 0 10px 0 0; }
+#emergency-card td.r { white-space: nowrap; }

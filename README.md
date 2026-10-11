@@ -27,13 +27,20 @@ choose **GitHub Actions**. After that, every push to `master` runs the tests, bu
 data file and deploys the site to `https://<your-user>.github.io/<repo>/`. The workflow also re-runs weekly
 to refresh Zillow values. Each search updates the URL (`?zip=19010`), so you can share a link to a report.
 
-Differences from the Python version:
-- API keys are entered on the page (**API keys** button) and stored only in your browser.
-- Yelp and GreatSchools don't allow browser calls, so restaurants come from OpenStreetMap
-  (no ratings, plus a link to Yelp's top-rated list), and schools always use the state-test score.
-- Monthly cost updates live as you change the rate or down payment.
+What the website shows, and where it comes from:
+- **Prebuilt at deploy time** (no browser calls, so no CORS or API keys needed): Zillow home values,
+  Census neighborhood profile, ZIP code locations (for "ZIPs within N minutes") and the nearest
+  hospitals, urgent care, fire and police stations (OpenStreetMap). The workflow refreshes these weekly.
+- **Live from the browser:** schools (NCES), crime (FBI; add a free api.data.gov key under **API key**
+  if it's rate-limited) and the FEMA flood zone.
+- **Links, filtered for you:** homes for sale on Zillow, Redfin and Realtor.com for your ZIP and every ZIP
+  within your drive time, with your max price and minimum beds applied; Google Maps searches for local
+  amenities; Google Maps, Yelp and Tripadvisor for restaurants; and Google Maps, Yelp and BBB for home
+  services (HVAC, plumbers, electricians, landscaping and more), plus the PA contractor registration lookup.
+- Monthly cost updates live as you change the rate or down payment. Each search updates the URL, so a
+  report can be shared or bookmarked.
 
-To preview locally: `python scripts/build_zhvi.py && python -m http.server -d docs`.
+To preview locally: `python scripts/build_site_data.py && python -m http.server -d docs`.
 
 ## Python app setup
 

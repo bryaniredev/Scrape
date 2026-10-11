@@ -1,0 +1,56 @@
+import importlib.util
+import sys
+from pathlib import Path
+
+SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
+sys.path.insert(0, str(SCRIPTS))
+spec = importlib.util.spec_from_file_location("build_site_data", SCRIPTS / "build_site_data.py")
+bsd = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(bsd)
+
+
+def test_parse_acs_keeps_names_and_drops_sentinels():
+    rows = [
+        ["B25077_001E", "B01002_001E", "zip code tabulation area"],
+        ["760000", "-666666666", "19010"],
+        ["300000", "41.5", "07030"],
+    ]
+    out = bsd.parse_acs(rows, bsd.ACS_DETAIL, "zip code tabulation area")
+    assert out["19010"] == {"medianHomeValue": 760000, "medianAge": None}
+    assert out["07030"]["medianAge"] == 41.5
+
+
+def test_build_acs_filters_to_pa(monkeypatch):
+    def fake(year, dataset, variables, geo):
+        col = "state" if geo.startswith("state") else "zip code tabulation area"
+        ids = ["42"] if col == "state" else ["19010", "07030", "15001"]
+        names = list(variables)
+        return [names + [col]] + [["1"] * len(names) + [i] for i in ids]
+
+    monkeypatch.setattr(bsd, "_census", fake)
+    data = bsd.build_acs()
+    assert data["year"] == 2024
+    assert sorted(data["zips"]) == ["15001", "19010"]
+    assert data["zips"]["19010"]["commuteMinutes"] == 1 and data["pa"]["population"] == 1
+
+
+def test_parse_gazetteer():
+    text = ("GEOID\tALAND\tAWATER\tALAND_SQMI\tAWATER_SQMI\tINTPTLAT\tINTPTLONG                                                                                                               \n"
+            "19010\t1\t1\t1\t1\t40.023456\t-75.329876\n"
+            "07030\t1\t1\t1\t1\t40.74\t-74.03\n")
+    assert bsd.parse_gazetteer(text) == {"19010": [40.02346, -75.32988]}
+
+
+def test_parse_emergency():
+    data = {"elements": [
+        {"lat": 40.03, "lon": -75.32, "tags": {"amenity": "hospital", "name": "Bryn Mawr Hospital", "emergency": "yes",
+                                              "addr:housenumber": "130", "addr:street": "S Bryn Mawr Ave", "addr:city": "Bryn Mawr"}},
+        {"center": {"lat": 40.0, "lon": -75.3}, "tags": {"amenity": "fire_station", "name": "Station 1"}},
+        {"lat": 40.1, "lon": -75.1, "tags": {"healthcare": "urgent_care"}},
+        {"lat": 40.1, "lon": -75.1, "tags": {"amenity": "police", "name": "PD"}},
+        {"lat": 40.1, "lon": -75.1, "tags": {"amenity": "cafe"}},
+    ]}
+    out = bsd.parse_emergency(data)
+    assert out["hospital"] == [[40.03, -75.32, "Bryn Mawr Hospital", "130 S Bryn Mawr Ave, Bryn Mawr", 1]]
+    assert out["fire"] == [[40.0, -75.3, "Station 1", ""]]
+    assert len(out["urgent"]) == 1 and len(out["police"]) == 1

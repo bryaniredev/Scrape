@@ -15,23 +15,26 @@ globalThis.fetch = async (url, opts = {}) => {
   return { ok: false, status: 404, json: async () => ({}) };
 };
 
+const ACS_ROW = { medianHomeValue: 760000, medianIncome: 145000, medianTaxes: 11400, medianAge: null,
+  pop25: 1000, bachelors: 200, masters: 100, professional: 30, doctorate: 20, occupied: 100, ownerOccupied: 72, commuteMinutes: 29.1 };
+
 routes.push(
   ["zippopotam", { places: [{ "place name": "Bryn Mawr", latitude: String(LAT), longitude: String(LON), "state abbreviation": "PA" }] }],
   ["geo.fcc.gov", { results: [{ county_name: "Montgomery County", county_fips: "42091" }] }],
-  ["acs5/profile", (u) => [["DP03_0025E", "x"], ["29.1", "1"]]],
-  ["api.census.gov", (u) => {
-    const names = new URL(u).searchParams.get("get").split(",");
-    const vals = { B25077_001E: "760000", B19013_001E: "145000", B25103_001E: "11400", B01002_001E: "-666666666",
-      B15003_001E: "1000", B15003_022E: "200", B15003_023E: "100", B15003_024E: "30", B15003_025E: "20" };
-    return [names, names.map((n) => vals[n] ?? "100")];
+  ["data/acs_pa.json", { year: 2024, zips: { 19010: ACS_ROW }, pa: { medianHomeValue: 250000, occupied: 100, ownerOccupied: 69 } }],
+  ["data/zhvi_pa.json", { zips: {
+    19010: { start: "2025-08", values: [780000, 790000, null, 800000, 805000, 806000, 807000, 808000, 810000, 812000, 815000, 817000, 819000], metro: "Philadelphia" },
+    19003: { start: "2026-07", values: [500000, 510000] },
+  } }],
+  ["data/zcta_pa.json", {
+    19010: [LAT, LON, "Bryn Mawr"],
+    19003: [LAT, LON + 0.03, "Ardmore"],        // ~1.6 mi -> ~4 min
+    19355: [LAT + 0.1, LON - 0.2, "Malvern"],    // ~12.5 mi -> ~28 min
   }],
-  ["data/zhvi_pa.json", { zips: { 19010: { start: "2025-08", values: [780000, 790000, null, 800000, 805000, 806000, 807000, 808000, 810000, 812000, 815000, 817000, 819000], metro: "Philadelphia" } } }],
-  ["api.rentcast.io", [
-    { formattedAddress: "1 Elm St", zipCode: "19010", price: 650000, squareFootage: 1800, daysOnMarket: 12, latitude: LAT + 0.01, longitude: LON },
-    { formattedAddress: "9 Oak Ave", zipCode: "19003", price: 450000, squareFootage: 1200, daysOnMarket: 30, latitude: LAT, longitude: LON + 0.03 },
-    { formattedAddress: "Far Rd", zipCode: "19355", price: 900000, latitude: LAT + 0.1, longitude: LON - 0.2 },
-  ]],
-  ["project-osrm", (u) => { const n = u.split("?")[0].split(";").length - 1; return { code: "Ok", durations: [[0, ...Array.from({ length: n }, (_, i) => (5 + 10 * i) * 60)]] }; }],
+  ["data/emergency_pa.json", {
+    hospital: [[LAT + 0.2, LON, "Far Hospital", "", 1], [LAT + 0.01, LON, "Bryn Mawr Hospital", "130 S Bryn Mawr Ave, Bryn Mawr", 1]],
+    urgent: [], fire: [[LAT, LON + 0.01, "Bryn Mawr Fire Co", ""]], police: [],
+  }],
   ["ccd/directory", { next: null, results: [
     { ncessch: "421", school_name: "Bryn Mawr Elementary", school_level: 1, lowest_grade_offered: 0, highest_grade_offered: 5, school_status: 1, virtual: 0, enrollment: 450, teachers_fte: 30, latitude: LAT + 0.005, longitude: LON },
     { ncessch: "423", school_name: "Closed", school_level: 1, school_status: 2, latitude: LAT, longitude: LON },
@@ -41,11 +44,6 @@ routes.push(
     { race: 1, sex: 99, read_test_pct_prof_midpt: 10, math_test_pct_prof_midpt: 10 },
     { race: 99, sex: 99, read_test_pct_prof_midpt: 82.5, math_test_pct_prof_midpt: 74.5 },
   ] } : { results: [] })],
-  ["overpass", { elements: [
-    { lat: LAT + 0.004, lon: LON, tags: { shop: "supermarket", name: "Acme" } },
-    { center: { lat: LAT + 0.01, lon: LON }, tags: { leisure: "park", name: "Ashbridge Park" } },
-    { lat: LAT, lon: LON + 0.002, tags: { amenity: "restaurant", name: "Tavola", cuisine: "italian;pizza" } },
-  ] }],
   ["agency/byStateAbbr", { MONTGOMERY: [
     { ori: "PA0460800", agency_name: "Lower Merion Township Police Department", latitude: LAT + 0.01, longitude: LON },
     { ori: "PAPSP0000", agency_name: "Pennsylvania State Police: Norristown", latitude: LAT, longitude: LON },
@@ -85,21 +83,48 @@ test("zillow summary handles gaps by date", async () => {
   await assert.rejects(app.fetchZhvi("19103"), /does not publish/);
 });
 
-test("census", async () => {
-  const acs = await app.fetchAcs("19010", {});
+test("census comes from the prebuilt file", async () => {
+  const acs = await app.fetchAcs("19010");
   assert.equal(acs.year, 2024);
   assert.equal(acs.zip.medianAge, null);
   assert.equal(acs.zip.degreePct, 35);
-  assert.equal(acs.zip.commuteMinutes, 29.1);
+  assert.equal(acs.zip.ownerPct, 72);
+  assert.equal(acs.pa.ownerPct, 69);
+  await assert.rejects(app.fetchAcs("19099"), /doesn't publish/);
 });
 
-test("listings filtered by drive time", async () => {
+test("home search links carry the filters", () => {
+  const l = app.homeSearchLinks("19010", { maxPrice: 500000, minBeds: 3 });
+  assert.equal(l.Zillow, "https://www.zillow.com/homes/for_sale/19010_rb/3-_beds/0-500000_price/");
+  assert.equal(l.Redfin, "https://www.redfin.com/zipcode/19010/filter/min-beds=3,max-price=500k");
+  assert.equal(l["Realtor.com"], "https://www.realtor.com/realestateandhomes-search/19010/beds-3/price-na-500000");
+  assert.equal(app.homeSearchLinks("19010", { maxPrice: 1250000 }).Redfin, "https://www.redfin.com/zipcode/19010/filter/max-price=1.25M");
+  assert.equal(app.homeSearchLinks("19010").Redfin, "https://www.redfin.com/zipcode/19010");
+});
+
+test("nearby ZIPs are limited by estimated drive time", async () => {
   const loc = await app.geocode("19010");
-  await assert.rejects(app.fetchListings(loc, 20, {}), /RentCast/);
-  const l = await app.fetchListings(loc, 20, { rentcast: "k" });
-  assert.deepEqual(l.homes.map((h) => h.drive), [5, 15]);
-  assert.equal(l.inZip.count, 1);
-  assert.equal(l.stats.median, 550000);
+  const z = await app.nearbyZips(loc, 20);
+  assert.deepEqual(z.map((x) => x.zip), ["19010", "19003"]);
+  assert.equal(z[0].value, 819000);
+  assert.equal(z[1].city, "Ardmore");
+  assert.equal((await app.nearbyZips(loc, 30)).length, 3);
+});
+
+test("nearest emergency services", async () => {
+  const loc = await app.geocode("19010");
+  const em = await app.fetchEmergency(loc);
+  assert.equal(em.hospital[0].name, "Bryn Mawr Hospital");
+  assert.ok(em.hospital[0].er && em.hospital[0].miles < 1);
+  assert.equal(em.hospital.length, 2);
+  assert.deepEqual(em.urgent, []);
+  assert.match(app.directionsUrl(loc, 40, -75), /google\.com\/maps\/dir\/\?api=1&origin=40\.0379%2C-75\.346&destination=40%2C-75/);
+});
+
+test("link builders encode the query", () => {
+  assert.equal(app.mapsSearch("grocery store", "19010"), "https://www.google.com/maps/search/grocery%20store%20near%2019010%2C%20PA");
+  assert.match(app.yelpSearch("Plumbers", "19010"), /find_desc=Plumbers&find_loc=19010%2C\+PA&sortby=rating/);
+  assert.match(app.bbbSearch("plumber", "19010"), /find_text=plumber&find_loc=19010/);
 });
 
 test("schools skip closed and virtual, rate by proficiency", async () => {
@@ -107,12 +132,6 @@ test("schools skip closed and virtual, rate by proficiency", async () => {
   assert.deepEqual(s.schools.map((x) => x.name), ["Bryn Mawr Elementary"]);
   assert.equal(s.schools[0].rating, 8);
   assert.equal(s.schools[0].grades, "K-5");
-});
-
-test("amenities", async () => {
-  const a = await app.fetchAmenities(await app.geocode("19010"));
-  assert.equal(a.categories["Grocery stores"].nearest[0].name, "Acme");
-  assert.equal(a.categories.Restaurants.nearest[0].cuisine, "italian, pizza");
 });
 
 test("crime prefers local police and compares to PA", async () => {

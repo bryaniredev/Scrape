@@ -16,21 +16,20 @@
     <form id="search">
       <label>ZIP code<input id="zip" name="zip" inputmode="numeric" pattern="\d{5}" maxlength="5" placeholder="e.g. 19103" required autofocus></label>
       <label>Max drive (min)<input id="drive" name="drive" type="number" min="5" max="60" value="20"></label>
+      <label>Max price $<input id="maxprice" name="maxprice" type="number" step="10000" min="0" placeholder="any" class="wide-input"></label>
+      <label>Min beds<input id="minbeds" name="minbeds" type="number" min="0" max="10" placeholder="any"></label>
       <label>Mortgage rate %<input id="rate" name="rate" type="number" step="0.05" min="0" value="6.5"></label>
       <label>Down payment %<input id="down" name="down" type="number" step="1" min="0" max="100" value="20"></label>
       <button type="submit" id="go">Scout</button>
-      <button type="button" id="settings-btn" class="secondary" aria-expanded="false" aria-controls="settings">API keys</button>
+      <button type="button" id="settings-btn" class="secondary" aria-expanded="false" aria-controls="settings">API key</button>
     </form>
     <section id="settings" class="card" hidden>
-      <h2>Optional API keys</h2>
-      <p class="small muted">Keys are saved only in this browser (localStorage) and sent only to the service they belong to. Every section works or degrades gracefully without them.</p>
+      <h2>Optional API key</h2>
+      <p class="small muted">The crime section uses the FBI's free API. The shared DEMO_KEY is rate-limited, so if crime data doesn't load, get a free key at <a href="https://api.data.gov/signup/" target="_blank" rel="noopener">api.data.gov</a>. It's saved only in this browser and sent only to the FBI API.</p>
       <div class="keys">
-        <label>RentCast key <span class="muted">(homes for sale, free tier)</span><input id="key-rentcast" autocomplete="off" spellcheck="false"></label>
-        <label>api.data.gov key <span class="muted">(FBI crime data; DEMO_KEY is rate-limited)</span><input id="key-datagov" autocomplete="off" spellcheck="false" placeholder="DEMO_KEY"></label>
-        <label>Census key <span class="muted">(optional)</span><input id="key-census" autocomplete="off" spellcheck="false"></label>
+        <label>api.data.gov key<input id="key-datagov" autocomplete="off" spellcheck="false" placeholder="DEMO_KEY"></label>
       </div>
-      <p class="small">Get keys: <a href="https://www.rentcast.io/api" target="_blank" rel="noopener">RentCast</a> &middot; <a href="https://api.data.gov/signup/" target="_blank" rel="noopener">api.data.gov</a> &middot; <a href="https://api.census.gov/data/key_signup.html" target="_blank" rel="noopener">Census</a></p>
-      <button type="button" id="save-keys">Save keys</button> <span id="keys-saved" class="small muted"></span>
+      <button type="button" id="save-keys">Save key</button> <span id="keys-saved" class="small muted"></span>
     </section>
   </div>
 </header>
@@ -39,7 +38,7 @@
   <div id="report"></div>
 </main>
 <footer class="wrap small muted">
-  Data: Zillow ZHVI, US Census ACS, RentCast, OSRM, NCES / Urban Institute Education Data, FBI Crime Data Explorer, OpenStreetMap, FEMA.
+  Data: Zillow ZHVI, US Census ACS &amp; Gazetteer, NCES / Urban Institute Education Data, FBI Crime Data Explorer, OpenStreetMap, FEMA. Listing, amenity and service links go to Zillow, Redfin, Realtor.com, Google Maps, Yelp and BBB.
   Figures are estimates for the ZIP code area, not a specific property.
 </footer>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

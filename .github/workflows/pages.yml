@@ -4,7 +4,7 @@ on:
   push:
     branches: [master]
   schedule:
-    - cron: "17 6 * * 1" # weekly, to refresh Zillow data
+    - cron: "17 6 * * 1" # weekly, to refresh the data files
   workflow_dispatch:
 
 permissions:
@@ -27,10 +27,10 @@ jobs:
       - run: pip install -r requirements.txt pytest
       - run: python -m pytest -q
       - run: node --test tests/site.test.mjs
-      - name: Build Zillow home value data
-        # If Zillow is unreachable the site still deploys; that section shows a notice.
+      - name: Build site data (Zillow, Census, ZIP locations, emergency services)
+        # Each file is built independently; anything that fails shows a notice on the site.
         continue-on-error: true
-        run: python scripts/build_zhvi.py docs/data/zhvi_pa.json
+        run: python scripts/build_site_data.py docs/data
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

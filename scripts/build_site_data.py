@@ -1,0 +1,227 @@
+"""Build the static data files the GitHub Pages site reads (docs/data/).
+
+Runs in GitHub Actions at deploy time, so the browser never has to call these
+sources directly (no CORS problems, no API keys):
+
+* zhvi_pa.json      - Zillow home values by ZIP (see build_zhvi.py)
+* acs_pa.json       - Census ACS 5-year neighborhood profile for every PA ZIP
+* zcta_pa.json      - ZIP centroids (Census Gazetteer), used for "ZIPs within N minutes"
+* emergency_pa.json - hospitals, urgent care, fire and police stations (OpenStreetMap)
+
+Each file is built independently; a failure in one doesn't stop the others.
+"""
+
+import csv
+import io
+import json
+import sys
+import zipfile
+from pathlib import Path
+
+import requests
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import build_zhvi  # noqa: E402
+from pa_home_scout import config  # noqa: E402
+from pa_home_scout.sources import zillow  # noqa: E402
+
+HEADERS = {"User-Agent": config.USER_AGENT}
+ACS_YEARS = (2024, 2023, 2022)
+
+# ACS variable -> key used by docs/app.js
+ACS_DETAIL = {
+    "B25077_001E": "medianHomeValue", "B25064_001E": "medianRent", "B19013_001E": "medianIncome",
+    "B01003_001E": "population", "B01002_001E": "medianAge", "B25003_001E": "occupied",
+    "B25003_002E": "ownerOccupied", "B25002_001E": "housingUnits", "B25002_003E": "vacant",
+    "B25035_001E": "medianYearBuilt", "B25103_001E": "medianTaxes", "B17001_001E": "povertyUniverse",
+    "B17001_002E": "belowPoverty", "B15003_001E": "pop25", "B15003_022E": "bachelors",
+    "B15003_023E": "masters", "B15003_024E": "professional", "B15003_025E": "doctorate",
+}
+ACS_PROFILE = {"DP03_0025E": "commuteMinutes"}
+
+GAZETTEER_URLS = [
+    f"https://www2.census.gov/geo/docs/maps-data/data/gazetteer/{y}_Gazetteer/{y}_Gaz_zcta_national.zip"
+    for y in (2024, 2023, 2022, 2020)
+]
+OVERPASS_URLS = ("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
+EMERGENCY_QUERY = """[out:json][timeout:300];
+area["ISO3166-2"="US-PA"][admin_level=4]->.pa;
+(
+  nwr["amenity"="hospital"](area.pa);
+  nwr["healthcare"="urgent_care"](area.pa);
+  nwr["amenity"="clinic"]["urgent_care"="yes"](area.pa);
+  nwr["amenity"="fire_station"](area.pa);
+  nwr["amenity"="police"](area.pa);
+);
+out center tags;"""
+
+
+def is_pa_zip(z: str) -> bool:
+    return len(z) == 5 and z.isdigit() and 15000 <= int(z) <= 19699
+
+
+def _num(v):
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return None
+    if n < -1:  # ACS "not available" sentinels
+        return None
+    return int(n) if n.is_integer() else n
+
+
+def _census(year: int, dataset: str, variables: dict, geo: str) -> list:
+    params = {"get": ",".join(variables), "for": geo}
+    if config.CENSUS_API_KEY:
+        params["key"] = config.CENSUS_API_KEY
+    resp = requests.get(f"https://api.census.gov/data/{year}/{dataset}", params=params,
+                        headers=HEADERS, timeout=300)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def parse_acs(rows: list, variables: dict, geo_col: str) -> dict:
+    """Census table rows -> {geo id: {key: value}}"""
+    header = rows[0]
+    gi = header.index(geo_col)
+    out = {}
+    for row in rows[1:]:
+        out[row[gi]] = {variables[h]: _num(v) for h, v in zip(header, row) if h in variables}
+    return out
+
+
+def build_acs() -> dict:
+    errors = []
+    for year in ACS_YEARS:
+        try:
+            zcta_col = "zip code tabulation area"
+            detail = parse_acs(_census(year, "acs/acs5", ACS_DETAIL, f"{zcta_col}:*"), ACS_DETAIL, zcta_col)
+            state = parse_acs(_census(year, "acs/acs5", ACS_DETAIL, "state:42"), ACS_DETAIL, "state")["42"]
+        except (requests.RequestException, ValueError, KeyError) as exc:
+            errors.append(f"{year}: {exc}")
+            continue
+        try:
+            prof = parse_acs(_census(year, "acs/acs5/profile", ACS_PROFILE, f"{zcta_col}:*"), ACS_PROFILE, zcta_col)
+            state.update(parse_acs(_census(year, "acs/acs5/profile", ACS_PROFILE, "state:42"), ACS_PROFILE, "state")["42"])
+        except (requests.RequestException, ValueError, KeyError):
+            prof = {}
+        zips = {}
+        for z, values in detail.items():
+            if is_pa_zip(z):
+                zips[z] = {**values, **prof.get(z, {})}
+        return {"year": year, "zips": zips, "pa": state}
+    raise RuntimeError("Census ACS unavailable: " + "; ".join(errors))
+
+
+def parse_gazetteer(text: str) -> dict:
+    reader = csv.reader(io.StringIO(text), delimiter="\t")
+    header = [h.strip() for h in next(reader)]
+    gi, lat, lon = header.index("GEOID"), header.index("INTPTLAT"), header.index("INTPTLONG")
+    out = {}
+    for row in reader:
+        z = row[gi].strip()
+        if is_pa_zip(z):
+            out[z] = [round(float(row[lat]), 5), round(float(row[lon]), 5)]
+    return out
+
+
+def build_zcta(zhvi_rows: dict | None) -> dict:
+    errors = []
+    for url in GAZETTEER_URLS:
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=300)
+            resp.raise_for_status()
+            with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+                text = zf.read(zf.namelist()[0]).decode("utf-8")
+            points = parse_gazetteer(text)
+            break
+        except (requests.RequestException, zipfile.BadZipFile, ValueError, KeyError, IndexError) as exc:
+            errors.append(f"{url}: {exc}")
+    else:
+        raise RuntimeError("Gazetteer unavailable: " + "; ".join(errors))
+    # [lat, lon, city] - city names come from Zillow's file when available
+    cities = {z: e.get("city", "") for z, e in (zhvi_rows or {}).items()}
+    return {z: [lat, lon, cities.get(z, "")] for z, (lat, lon) in points.items()}
+
+
+def classify_emergency(tags: dict) -> str | None:
+    if tags.get("amenity") == "hospital":
+        return "hospital"
+    if tags.get("healthcare") == "urgent_care" or tags.get("urgent_care") == "yes":
+        return "urgent"
+    if tags.get("amenity") == "fire_station":
+        return "fire"
+    if tags.get("amenity") == "police":
+        return "police"
+    return None
+
+
+def parse_emergency(data: dict) -> dict:
+    out = {"hospital": [], "urgent": [], "fire": [], "police": []}
+    for el in data.get("elements", []):
+        tags = el.get("tags", {})
+        kind = classify_emergency(tags)
+        lat = el.get("lat", el.get("center", {}).get("lat"))
+        lon = el.get("lon", el.get("center", {}).get("lon"))
+        if not kind or lat is None:
+            continue
+        name = tags.get("name") or tags.get("official_name") or ""
+        street = " ".join(filter(None, [tags.get("addr:housenumber"), tags.get("addr:street")]))
+        addr = ", ".join(filter(None, [street, tags.get("addr:city")]))
+        entry = [round(lat, 5), round(lon, 5), name, addr]
+        if kind == "hospital":
+            entry.append(1 if tags.get("emergency") == "yes" else 0)
+        out[kind].append(entry)
+    return out
+
+
+def build_emergency() -> dict:
+    errors = []
+    for url in OVERPASS_URLS:
+        try:
+            resp = requests.post(url, data={"data": EMERGENCY_QUERY}, headers=HEADERS, timeout=360)
+            resp.raise_for_status()
+            result = parse_emergency(resp.json())
+            if sum(len(v) for v in result.values()):
+                return result
+            errors.append(f"{url}: no results")
+        except (requests.RequestException, ValueError) as exc:
+            errors.append(f"{url}: {exc}")
+    raise RuntimeError("Overpass unavailable: " + "; ".join(errors))
+
+
+def write(out_dir: Path, name: str, data: dict) -> None:
+    path = out_dir / name
+    path.write_text(json.dumps(data, separators=(",", ":")))
+    print(f"wrote {path} ({path.stat().st_size / 1e6:.2f} MB)")
+
+
+def main(out: str = "docs/data") -> int:
+    out_dir = Path(out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    failures = 0
+    zhvi_rows = None
+    try:
+        zhvi_rows = zillow._load_pa_rows()
+        write(out_dir, "zhvi_pa.json", build_zhvi.build(zhvi_rows))
+    except Exception as exc:  # noqa: BLE001 - keep building the other files
+        failures += 1
+        print(f"zhvi failed: {exc}")
+    for name, builder in (
+        ("acs_pa.json", build_acs),
+        ("zcta_pa.json", lambda: build_zcta(zhvi_rows)),
+        ("emergency_pa.json", build_emergency),
+    ):
+        try:
+            write(out_dir, name, builder())
+        except Exception as exc:  # noqa: BLE001
+            failures += 1
+            print(f"{name} failed: {exc}")
+    print(f"done, {failures} failure(s)")
+    return 0  # partial data is fine; the site shows a notice for anything missing
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(*sys.argv[1:]))
